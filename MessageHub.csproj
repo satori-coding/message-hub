@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.18" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.18" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.18" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.18" />
+    <PackageReference Include="Azure.Extensions.AspNetCore.Configuration.Secrets" Version="1.3.2" />
+    <PackageReference Include="Microsoft.ApplicationInsights.AspNetCore" Version="2.22.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="MessageHub.Shared\MessageHub.Shared.csproj" />
+    <ProjectReference Include="MessageHub.SmppChannel\MessageHub.SmppChannel.csproj" />
+    <ProjectReference Include="MessageHub.HttpSmsChannel\MessageHub.HttpSmsChannel.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="MessageHub.SmppChannel\**" />
+    <Content Remove="MessageHub.SmppChannel\**" />
+    <EmbeddedResource Remove="MessageHub.SmppChannel\**" />
+    <None Remove="MessageHub.SmppChannel\**" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,114 @@
+# SMS Service API Tests
+# Installiere die "REST Client" Extension in VS Code
+# Dann kannst du auf "Send Request" über jeder ### Zeile klicken
+
+### Variablen für lokale Entwicklung
+@baseUrl = https://localhost:7142/api/sms
+@baseUrlHttp = http://localhost:5289/api/sms
+
+### 1. SMS senden (POST)
+POST {{baseUrl}}/send
+Content-Type: application/json
+
+{
+  "phoneNumber": "+49123456789",
+  "content": "Hallo! Dies ist eine Test-SMS von der API."
+}
+
+### 2. SMS senden mit längerer Nachricht
+POST {{baseUrl}}/send
+Content-Type: application/json
+
+{
+  "phoneNumber": "+49987654321", 
+  "content": "Dies ist eine längere Test-Nachricht um zu prüfen, ob längere SMS-Inhalte korrekt verarbeitet werden. Die Nachricht sollte erfolgreich gespeichert und versendet werden."
+}
+
+### 3. SMS senden - Fehlerfall (leere Telefonnummer)
+POST {{baseUrl}}/send
+Content-Type: application/json
+
+{
+  "phoneNumber": "",
+  "content": "Test Nachricht"
+}
+
+### 4. SMS senden - Fehlerfall (zu lange Nachricht)
+POST {{baseUrl}}/send
+Content-Type: application/json
+
+{
+  "phoneNumber": "+49123456789",
+  "content": "Diese Nachricht ist viel zu lang und sollte einen Fehler verursachen, da sie über 1000 Zeichen hat. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem."
+}
+
+### 5. Alle SMS Nachrichten abrufen (GET)
+GET {{baseUrl}}
+Accept: application/json
+
+### 6. Spezifische SMS Status abrufen (GET) - ID 1
+GET {{baseUrl}}/1/status
+Accept: application/json
+
+### 7. Spezifische SMS Status abrufen (GET) - ID 2  
+GET {{baseUrl}}/2/status
+Accept: application/json
+
+### 8. SMS Status abrufen - nicht existierende ID
+GET {{baseUrl}}/999/status
+Accept: application/json
+
+### 9. Health Check - Swagger UI
+GET {{baseUrl}}/../../swagger
+Accept: text/html
+
+### 10. SMS über Service Bus Queue senden (POST)
+POST {{baseUrl}}/send-to-queue
+Content-Type: application/json
+
+{
+  "phoneNumber": "+49123456789",
+  "content": "Test 2 SMS über Service Bus Queue mit MassTransit"
+}
+
+### 11. SMS über Service Bus Queue - längere Nachricht
+POST {{baseUrl}}/send-to-queue
+Content-Type: application/json
+
+{
+  "phoneNumber": "+49987654321",
+  "content": "Dies ist ein Test der Service Bus Integration. Die Nachricht wird über Azure Service Bus Queue gesendet und vom Consumer verarbeitet."
+}
+
+### 12. SMS über Service Bus Queue - Fehlerfall (leere Telefonnummer)
+POST {{baseUrl}}/send-to-queue
+Content-Type: application/json
+
+{
+  "phoneNumber": "",
+  "content": "Test Nachricht für Queue"
+}
+
+### Alternative HTTP (ohne HTTPS) für lokale Tests
+
+### SMS senden via HTTP (direkt)
+POST {{baseUrlHttp}}/send
+Content-Type: application/json
+
+{
+  "phoneNumber": "+49111222333",
+  "content": "Test SMS über HTTP"
+}
+
+### SMS senden via HTTP (über Queue)
+POST {{baseUrlHttp}}/send-to-queue
+Content-Type: application/json
+
+{
+  "phoneNumber": "+49111222333",
+  "content": "Test SMS über HTTP und Service Bus Queue"
+}
+
+### Alle SMS via HTTP abrufen
+GET {{baseUrlHttp}}
+Accept: application/json
