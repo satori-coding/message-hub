@@ -8,7 +8,7 @@ namespace MessageHub.HttpSmsChannel;
 /// HTTP/REST SMS Channel implementation
 /// Supports multiple HTTP SMS providers (Twilio, AWS SNS, Azure SMS, etc.)
 /// </summary>
-public class HttpSmsChannel : ISmsChannel
+public class HttpSmsChannel : IMessageChannel
 {
     private readonly HttpSmsChannelConfiguration _configuration;
     private readonly ILogger<HttpSmsChannel> _logger;
@@ -29,16 +29,16 @@ public class HttpSmsChannel : ISmsChannel
         _logger.LogInformation("HTTP SMS Channel initialized for provider: {ProviderName}", _configuration.ProviderName);
     }
 
-    public async Task<SmsChannelResult> SendSmsAsync(SmsMessage message)
+    public async Task<MessageResult> SendAsync(Message message)
     {
         if (message == null)
-            return SmsChannelResult.CreateFailure("Message cannot be null");
+            return MessageResult.CreateFailure("Message cannot be null");
 
-        if (string.IsNullOrWhiteSpace(message.PhoneNumber) || string.IsNullOrWhiteSpace(message.Content))
-            return SmsChannelResult.CreateFailure("Phone number and content are required");
+        if (string.IsNullOrWhiteSpace(message.Recipient) || string.IsNullOrWhiteSpace(message.Content))
+            return MessageResult.CreateFailure("Phone number and content are required");
 
-        _logger.LogInformation("Sending SMS via HTTP channel to {PhoneNumber} using provider {ProviderName}",
-            message.PhoneNumber, _configuration.ProviderName);
+        _logger.LogInformation("Sending SMS via HTTP channel to {Recipient} using provider {ProviderName}",
+            message.Recipient, _configuration.ProviderName);
 
         var startTime = DateTime.UtcNow;
 
@@ -82,7 +82,7 @@ public class HttpSmsChannel : ISmsChannel
             _logger.LogError(httpEx, "HTTP request failed after {Duration}ms. Provider: {ProviderName}",
                 duration.TotalMilliseconds, _configuration.ProviderName);
 
-            return SmsChannelResult.CreateFailure(
+            return MessageResult.CreateFailure(
                 $"HTTP request failed: {httpEx.Message}",
                 networkErrorCode: httpEx.Data["StatusCode"] as int?
             );
@@ -93,7 +93,7 @@ public class HttpSmsChannel : ISmsChannel
             _logger.LogError(timeoutEx, "HTTP request timed out after {Duration}ms. Provider: {ProviderName}",
                 duration.TotalMilliseconds, _configuration.ProviderName);
 
-            return SmsChannelResult.CreateFailure("HTTP request timed out", networkErrorCode: 408);
+            return MessageResult.CreateFailure("HTTP request timed out", networkErrorCode: 408);
         }
         catch (Exception ex)
         {
@@ -101,7 +101,7 @@ public class HttpSmsChannel : ISmsChannel
             _logger.LogError(ex, "Unexpected error during HTTP SMS send after {Duration}ms. Provider: {ProviderName}",
                 duration.TotalMilliseconds, _configuration.ProviderName);
 
-            return SmsChannelResult.CreateFailure($"Unexpected error: {ex.Message}");
+            return MessageResult.CreateFailure($"Unexpected error: {ex.Message}");
         }
     }
 
@@ -144,7 +144,7 @@ public class HttpSmsChannel : ISmsChannel
         }
     }
 
-    private async Task<HttpRequestMessage> BuildHttpRequestAsync(SmsMessage message)
+    private async Task<HttpRequestMessage> BuildHttpRequestAsync(Message message)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, _configuration.ApiUrl);
 
@@ -167,7 +167,7 @@ public class HttpSmsChannel : ISmsChannel
         return request;
     }
 
-    private string BuildRequestBody(SmsMessage message)
+    private string BuildRequestBody(Message message)
     {
         // Use provider-specific template or generic format
         var body = new Dictionary<string, object>();
@@ -177,7 +177,7 @@ public class HttpSmsChannel : ISmsChannel
         {
             // Replace placeholders in template
             var template = _configuration.RequestBodyTemplate;
-            template = template.Replace("{PhoneNumber}", message.PhoneNumber);
+            template = template.Replace("{PhoneNumber}", message.Recipient);
             template = template.Replace("{Content}", message.Content);
             template = template.Replace("{From}", _configuration.FromNumber ?? "MessageHub");
             
@@ -185,7 +185,7 @@ public class HttpSmsChannel : ISmsChannel
         }
 
         // Generic format (works with many providers)
-        body["to"] = message.PhoneNumber;
+        body["to"] = message.Recipient;
         body["message"] = message.Content;
         if (!string.IsNullOrEmpty(_configuration.FromNumber))
             body["from"] = _configuration.FromNumber;
@@ -193,7 +193,7 @@ public class HttpSmsChannel : ISmsChannel
         return JsonSerializer.Serialize(body);
     }
 
-    private async Task<SmsChannelResult> ParseResponseAsync(HttpResponseMessage response, string responseContent)
+    private async Task<MessageResult> ParseResponseAsync(HttpResponseMessage response, string responseContent)
     {
         try
         {
@@ -208,14 +208,14 @@ public class HttpSmsChannel : ISmsChannel
                     ["HttpStatusCode"] = (int)response.StatusCode
                 };
 
-                return SmsChannelResult.CreateSuccess(messageId ?? Guid.NewGuid().ToString(), channelData);
+                return MessageResult.CreateSuccess(messageId ?? Guid.NewGuid().ToString(), channelData);
             }
             else
             {
                 _logger.LogError("HTTP SMS API returned error. Status: {StatusCode}, Response: {Response}",
                     response.StatusCode, responseContent);
 
-                return SmsChannelResult.CreateFailure(
+                return MessageResult.CreateFailure(
                     $"HTTP API error: {response.StatusCode}",
                     errorCode: (int)response.StatusCode,
                     networkErrorCode: (int)response.StatusCode
@@ -225,7 +225,7 @@ public class HttpSmsChannel : ISmsChannel
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error parsing HTTP SMS response: {Response}", responseContent);
-            return SmsChannelResult.CreateFailure($"Response parsing error: {ex.Message}");
+            return MessageResult.CreateFailure($"Response parsing error: {ex.Message}");
         }
     }
 

@@ -5,14 +5,14 @@ namespace MessageHub;
 
 [ApiController]
 [Route("api/[controller]")]
-public class SmsController : ControllerBase
+public class MessageController : ControllerBase
 {
-    private readonly SmsService _smsService;
-    private readonly ILogger<SmsController> _logger;
+    private readonly MessageService _messageService;
+    private readonly ILogger<MessageController> _logger;
 
-    public SmsController(SmsService smsService, ILogger<SmsController> logger)
+    public MessageController(MessageService messageService, ILogger<MessageController> logger)
     {
-        _smsService = smsService;
+        _messageService = messageService;
         _logger = logger;
     }
 
@@ -21,9 +21,9 @@ public class SmsController : ControllerBase
     {
         _logger.LogInformation("Getting SMS status for ID: {SmsMessageId}", id);
 
-        var smsMessage = await _smsService.GetSmsMessageAsync(id);
+        var message = await _messageService.GetMessageAsync(id);
         
-        if (smsMessage == null)
+        if (message == null)
         {
             _logger.LogWarning("SMS message with ID {SmsMessageId} not found", id);
             return NotFound($"SMS message with ID {id} not found");

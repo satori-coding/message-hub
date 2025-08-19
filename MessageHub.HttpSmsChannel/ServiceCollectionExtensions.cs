@@ -36,8 +36,8 @@ public static class ServiceCollectionExtensions
             client.DefaultRequestHeaders.Add("User-Agent", "MessageHub-HttpSmsChannel/1.0");
         });
 
-        // Register HTTP SMS Channel as ISmsChannel
-        services.AddScoped<ISmsChannel, HttpSmsChannel>(provider =>
+        // Register HTTP SMS Channel as IMessageChannel
+        services.AddScoped<IMessageChannel, HttpSmsChannel>(provider =>
         {
             var logger = provider.GetRequiredService<ILogger<HttpSmsChannel>>();
             var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();

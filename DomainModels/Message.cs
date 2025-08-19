@@ -2,7 +2,7 @@ using MessageHub.Shared;
 
 namespace MessageHub;
 
-public enum SmsStatus
+public enum MessageStatus
 {
     Pending,      // Message created but not yet sent
     Sent,         // Message submitted to SMSC (not final - waiting for DLR)
@@ -15,12 +15,12 @@ public enum SmsStatus
     Accepted      // DLR: Message accepted but delivery status unclear
 }
 
-public class SmsMessage
+public class Message
 {
     public int Id { get; set; }
-    public string PhoneNumber { get; set; } = string.Empty;
+    public string Recipient { get; set; } = string.Empty;
     public string Content { get; set; } = string.Empty;
-    public SmsStatus Status { get; set; } = SmsStatus.Pending;
+    public MessageStatus Status { get; set; } = MessageStatus.Pending;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? SentAt { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

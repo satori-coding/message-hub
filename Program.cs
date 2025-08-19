@@ -70,8 +70,8 @@ builder.Services.AddScoped<IEnumerable<MessageHub.ISmsChannel>>(serviceProvider 
     return channels;
 });
 
-// Add SMS Service
-builder.Services.AddScoped<SmsService>();
+// Add Message Service
+builder.Services.AddScoped<MessageService>();
 
 var app = builder.Build();
 
@@ -79,7 +79,7 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var smppChannel = scope.ServiceProvider.GetRequiredService<ISmppChannel>();
-    var smsService = scope.ServiceProvider.GetRequiredService<SmsService>();
+    var messageService = scope.ServiceProvider.GetRequiredService<MessageService>();
     
     // Subscribe to delivery receipt events
     smppChannel.OnDeliveryReceiptReceived += receipt =>
@@ -90,8 +90,8 @@ using (var scope = app.Services.CreateScope())
             try
             {
                 using var serviceScope = app.Services.CreateScope();
-                var scopedSmsService = serviceScope.ServiceProvider.GetRequiredService<SmsService>();
-                await scopedSmsService.ProcessDeliveryReceiptAsync(receipt);
+                var scopedMessageService = serviceScope.ServiceProvider.GetRequiredService<MessageService>();
+                await scopedMessageService.ProcessDeliveryReceiptAsync(receipt);
             }
             catch (Exception ex)
             {

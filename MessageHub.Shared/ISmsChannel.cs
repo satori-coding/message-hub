@@ -6,13 +6,16 @@ namespace MessageHub.Shared;
 public enum ChannelType
 {
     SMPP,
-    HTTP
+    HTTP,
+    EMAIL,
+    PUSH,
+    WHATSAPP
 }
 
 /// <summary>
-/// Common interface for all SMS channel implementations (SMPP, HTTP, etc.)
+/// Common interface for all message channel implementations (SMPP, HTTP, Email, Push, etc.)
 /// </summary>
-public interface ISmsChannel
+public interface IMessageChannel
 {
     /// <summary>
     /// Channel type identifier
@@ -25,11 +28,11 @@ public interface ISmsChannel
     string ProviderName { get; }
     
     /// <summary>
-    /// Send SMS via this channel
+    /// Send message via this channel
     /// </summary>
-    /// <param name="message">SMS message to send</param>
-    /// <returns>Result of SMS send operation</returns>
-    Task<SmsChannelResult> SendSmsAsync(SmsMessage message);
+    /// <param name="message">Message to send</param>
+    /// <returns>Result of message send operation</returns>
+    Task<MessageResult> SendAsync(Message message);
     
     /// <summary>
     /// Check if channel is healthy and ready to send messages
@@ -39,9 +42,9 @@ public interface ISmsChannel
 }
 
 /// <summary>
-/// Result of SMS send operation via any channel
+/// Result of message send operation via any channel
 /// </summary>
-public class SmsChannelResult
+public class MessageResult
 {
     public bool Success { get; set; }
     public string? ProviderMessageId { get; set; }
@@ -50,9 +53,9 @@ public class SmsChannelResult
     public int? NetworkErrorCode { get; set; }
     public Dictionary<string, object>? ChannelData { get; set; } = new();
 
-    public static SmsChannelResult CreateSuccess(string providerMessageId, Dictionary<string, object>? channelData = null)
+    public static MessageResult CreateSuccess(string providerMessageId, Dictionary<string, object>? channelData = null)
     {
-        return new SmsChannelResult
+        return new MessageResult
         {
             Success = true,
             ProviderMessageId = providerMessageId,
@@ -60,9 +63,9 @@ public class SmsChannelResult
         };
     }
 
-    public static SmsChannelResult CreateFailure(string errorMessage, int? errorCode = null, int? networkErrorCode = null)
+    public static MessageResult CreateFailure(string errorMessage, int? errorCode = null, int? networkErrorCode = null)
     {
-        return new SmsChannelResult
+        return new MessageResult
         {
             Success = false,
             ErrorMessage = errorMessage,
@@ -73,12 +76,12 @@ public class SmsChannelResult
 }
 
 /// <summary>
-/// SMS message entity for channel operations
+/// Message entity for channel operations
 /// </summary>
-public class SmsMessage
+public class Message
 {
     public int Id { get; set; }
-    public string PhoneNumber { get; set; } = string.Empty;
+    public string Recipient { get; set; } = string.Empty;
     public string Content { get; set; } = string.Empty;
     public ChannelType ChannelType { get; set; } = ChannelType.SMPP;
     public string? ProviderName { get; set; }

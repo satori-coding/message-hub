@@ -10,7 +10,7 @@ namespace MessageHub.SmppChannel;
 /// <summary>
 /// Main SMPP channel implementation with connection pooling and delivery receipt handling
 /// </summary>
-public class SmppChannel : ISmppChannel, ISmsChannel, IAsyncDisposable
+public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
 {
     private readonly SmppChannelConfiguration _configuration;
     private readonly ILogger<SmppChannel> _logger;
@@ -23,7 +23,7 @@ public class SmppChannel : ISmppChannel, ISmsChannel, IAsyncDisposable
 
     public event Action<SmppDeliveryReceipt>? OnDeliveryReceiptReceived;
 
-    // ISmsChannel implementation
+    // IMessageChannel implementation
     public ChannelType ChannelType => ChannelType.SMPP;
     public string ProviderName => "SMPP";
 
@@ -536,13 +536,13 @@ public class SmppChannel : ISmppChannel, ISmsChannel, IAsyncDisposable
         await Task.CompletedTask;
     }
 
-    // ISmsChannel implementation
-    async Task<SmsChannelResult> ISmsChannel.SendSmsAsync(SmsMessage message)
+    // IMessageChannel implementation
+    async Task<MessageResult> IMessageChannel.SendAsync(Message message)
     {
-        // Convert SmsMessage to SmppMessage
+        // Convert Message to SmppMessage
         var smppMessage = new SmppMessage
         {
-            PhoneNumber = message.PhoneNumber,
+            PhoneNumber = message.Recipient,
             Content = message.Content,
             From = "MessageHub",
             RequestDeliveryReceipt = true
@@ -551,10 +551,10 @@ public class SmppChannel : ISmppChannel, ISmsChannel, IAsyncDisposable
         // Call the existing SMPP implementation
         var smppResult = await SendSmsAsync(smppMessage);
 
-        // Convert SmppSendResult to SmsChannelResult
+        // Convert SmppSendResult to MessageResult
         if (smppResult.IsSuccess)
         {
-            return SmsChannelResult.CreateSuccess(
+            return MessageResult.CreateSuccess(
                 smppResult.SmppMessageId ?? "",
                 new Dictionary<string, object>
                 {
@@ -565,7 +565,7 @@ public class SmppChannel : ISmppChannel, ISmsChannel, IAsyncDisposable
         }
         else
         {
-            return SmsChannelResult.CreateFailure(
+            return MessageResult.CreateFailure(
                 smppResult.ErrorMessage ?? "Unknown SMPP error",
                 smppResult.Exception?.HResult
             );

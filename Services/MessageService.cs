@@ -6,125 +6,125 @@ using MessageHub.Shared;
 namespace MessageHub;
 
 /// <summary>
-/// Service for handling SMS operations using multiple channels (SMPP, HTTP, etc.)
+/// Service for handling message operations using multiple channels (SMPP, HTTP, Email, Push, etc.)
 /// </summary>
-public class SmsService
+public class MessageService
 {
     private readonly ApplicationDbContext _dbContext;
-    private readonly ILogger<SmsService> _logger;
+    private readonly ILogger<MessageService> _logger;
     private readonly ISmppChannel _smppChannel;
-    private readonly Dictionary<ChannelType, ISmsChannel> _smsChannels;
+    private readonly Dictionary<ChannelType, IMessageChannel> _messageChannels;
 
-    public SmsService(ApplicationDbContext dbContext, ILogger<SmsService> logger, 
-                      ISmppChannel smppChannel, IEnumerable<ISmsChannel> smsChannels)
+    public MessageService(ApplicationDbContext dbContext, ILogger<MessageService> logger, 
+                      ISmppChannel smppChannel, IEnumerable<IMessageChannel> messageChannels)
     {
         _dbContext = dbContext;
         _logger = logger;
         _smppChannel = smppChannel;
         
         // Build dictionary of available channels by type
-        _smsChannels = smsChannels.ToDictionary(c => c.ChannelType, c => c);
+        _messageChannels = messageChannels.ToDictionary(c => c.ChannelType, c => c);
         
-        _logger.LogInformation("SmsService initialized with {ChannelCount} channels: {Channels}",
-            _smsChannels.Count, string.Join(", ", _smsChannels.Values.Select(c => c.ProviderName)));
+        _logger.LogInformation("MessageService initialized with {ChannelCount} channels: {Channels}",
+            _messageChannels.Count, string.Join(", ", _messageChannels.Values.Select(c => c.ProviderName)));
     }
 
     /// <summary>
-    /// Creates and sends an SMS message directly using the specified channel
+    /// Creates and sends a message directly using the specified channel
     /// </summary>
-    public async Task<SmsMessage> CreateAndSendSmsAsync(string phoneNumber, string content, ChannelType channelType = ChannelType.SMPP)
+    public async Task<Message> CreateAndSendMessageAsync(string recipient, string content, ChannelType channelType = ChannelType.SMPP)
     {
-        _logger.LogInformation("Creating and sending new SMS to {PhoneNumber}, Content length: {ContentLength}", 
-            phoneNumber, content.Length);
+        _logger.LogInformation("Creating and sending new message to {Recipient}, Content length: {ContentLength}", 
+            recipient, content.Length);
 
-        var smsMessage = new SmsMessage
+        var message = new Message
         {
-            PhoneNumber = phoneNumber,
+            Recipient = recipient,
             Content = content,
-            Status = SmsStatus.Pending,
+            Status = MessageStatus.Pending,
             ChannelType = channelType,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
 
-        _dbContext.SmsMessages.Add(smsMessage);
+        _dbContext.Messages.Add(message);
         await _dbContext.SaveChangesAsync();
 
-        _logger.LogInformation("SMS message created with ID: {SmsMessageId}", smsMessage.Id);
+        _logger.LogInformation("Message created with ID: {MessageId}", message.Id);
 
         // Send SMS via specified channel
-        await SendSmsAsync(smsMessage.Id);
+        await SendMessageAsync(message.Id);
 
-        return smsMessage;
+        return message;
     }
 
     /// <summary>
     /// Sends an SMS message by ID via the channel specified in the message
     /// </summary>
-    public async Task SendSmsAsync(int smsMessageId)
+    public async Task SendMessageAsync(int messageId)
     {
-        _logger.LogInformation("Starting SMS send process for message ID: {SmsMessageId}", smsMessageId);
+        _logger.LogInformation("Starting message send process for message ID: {MessageId}", messageId);
         
         var startTime = DateTime.UtcNow;
         
         try
         {
-            var smsMessage = await _dbContext.SmsMessages.FindAsync(smsMessageId);
-            if (smsMessage == null)
+            var message = await _dbContext.Messages.FindAsync(messageId);
+            if (message == null)
             {
-                _logger.LogError("SMS message with ID {SmsMessageId} not found", smsMessageId);
+                _logger.LogError("Message with ID {MessageId} not found", messageId);
                 return;
             }
 
             _logger.LogInformation("Found SMS message: Phone={PhoneNumber}, Content length={ContentLength}", 
-                smsMessage.PhoneNumber, smsMessage.Content.Length);
+                message.Recipient, message.Content.Length);
 
             try
             {
                 // Get the appropriate channel for this message
-                if (!_smsChannels.TryGetValue(smsMessage.ChannelType, out var channel))
+                if (!_messageChannels.TryGetValue(message.ChannelType, out var channel))
                 {
-                    _logger.LogError("No channel available for type {ChannelType} for message ID: {SmsMessageId}", 
-                        smsMessage.ChannelType, smsMessageId);
-                    await UpdateSmsStatusAsync(smsMessage, SmsStatus.Failed);
+                    _logger.LogError("No channel available for type {ChannelType} for message ID: {MessageId}", 
+                        message.ChannelType, messageId);
+                    await UpdateMessageStatusAsync(message, MessageStatus.Failed);
                     return;
                 }
 
                 _logger.LogInformation("Sending SMS via {ChannelType} channel ({ProviderName}) to {PhoneNumber}", 
-                    smsMessage.ChannelType, channel.ProviderName, smsMessage.PhoneNumber);
+                    message.ChannelType, channel.ProviderName, message.Recipient);
 
                 // Send via the selected channel
-                var result = await channel.SendSmsAsync(smsMessage);
+                var result = await channel.SendAsync(message);
 
                 if (result.Success && !string.IsNullOrEmpty(result.ProviderMessageId))
                 {
-                    _logger.LogInformation("SMS sent successfully for message ID: {SmsMessageId}, Provider ID: {ProviderMessageId}, Channel: {ChannelType}", 
-                        smsMessageId, result.ProviderMessageId, smsMessage.ChannelType);
+                    _logger.LogInformation("Message sent successfully for message ID: {MessageId}, Provider ID: {ProviderMessageId}, Channel: {ChannelType}", 
+                        messageId, result.ProviderMessageId, message.ChannelType);
                     
-                    smsMessage.SentAt = DateTime.UtcNow;
-                    smsMessage.ProviderMessageId = result.ProviderMessageId;
-                    smsMessage.ProviderName = channel.ProviderName;
+                    message.SentAt = DateTime.UtcNow;
+                    message.ProviderMessageId = result.ProviderMessageId;
+                    message.ProviderName = channel.ProviderName;
                     
                     // Store channel-specific data if available
                     if (result.ChannelData != null && result.ChannelData.Any())
                     {
-                        smsMessage.ChannelData = System.Text.Json.JsonSerializer.Serialize(result.ChannelData);
+                        message.ChannelData = System.Text.Json.JsonSerializer.Serialize(result.ChannelData);
                     }
                     
-                    await UpdateSmsStatusAsync(smsMessage, SmsStatus.Sent);
+                    await UpdateMessageStatusAsync(message, MessageStatus.Sent);
                 }
                 else
                 {
                     _logger.LogError("{ChannelType} send failed for message ID: {SmsMessageId}, Error: {ErrorMessage}", 
                         smsMessage.ChannelType, smsMessageId, result.ErrorMessage);
-                    await UpdateSmsStatusAsync(smsMessage, SmsStatus.Failed);
+                    await UpdateMessageStatusAsync(message, MessageStatus.Failed);
                 }
             }
             catch (Exception channelEx)
             {
                 _logger.LogError(channelEx, "{ChannelType} send failed for message ID: {SmsMessageId}", 
                     smsMessage.ChannelType, smsMessageId);
-                await UpdateSmsStatusAsync(smsMessage, SmsStatus.Failed);
+                await UpdateMessageStatusAsync(message, MessageStatus.Failed);
             }
         }
         catch (Exception ex)
@@ -134,7 +134,7 @@ public class SmsService
             var smsMessage = await _dbContext.SmsMessages.FindAsync(smsMessageId);
             if (smsMessage != null)
             {
-                await UpdateSmsStatusAsync(smsMessage, SmsStatus.Failed);
+                await UpdateMessageStatusAsync(message, MessageStatus.Failed);
             }
         }
         finally
