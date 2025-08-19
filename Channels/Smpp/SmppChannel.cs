@@ -3,9 +3,9 @@ using Inetlab.SMPP.Common;
 using Inetlab.SMPP.PDU;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
-using MessageHub.Shared;
+using MessageHub.Channels.Shared;
 
-namespace MessageHub.SmppChannel;
+namespace MessageHub.Channels.Smpp;
 
 /// <summary>
 /// Main SMPP channel implementation with connection pooling and delivery receipt handling

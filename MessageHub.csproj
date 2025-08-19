@@ -16,19 +16,16 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.18" />
     <PackageReference Include="Azure.Extensions.AspNetCore.Configuration.Secrets" Version="1.3.2" />
     <PackageReference Include="Microsoft.ApplicationInsights.AspNetCore" Version="2.22.0" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="MessageHub.Shared\MessageHub.Shared.csproj" />
-    <ProjectReference Include="MessageHub.SmppChannel\MessageHub.SmppChannel.csproj" />
-    <ProjectReference Include="MessageHub.HttpSmsChannel\MessageHub.HttpSmsChannel.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Compile Remove="MessageHub.SmppChannel\**" />
-    <Content Remove="MessageHub.SmppChannel\**" />
-    <EmbeddedResource Remove="MessageHub.SmppChannel\**" />
-    <None Remove="MessageHub.SmppChannel\**" />
+    
+    <!-- SMPP Channel Dependencies -->
+    <PackageReference Include="Inetlab.SMPP" Version="2.6.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
+    
+    <!-- HTTP Channel Dependencies -->
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
   </ItemGroup>
 
 </Project>

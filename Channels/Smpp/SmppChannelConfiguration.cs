@@ -1,4 +1,4 @@
-namespace MessageHub.SmppChannel;
+namespace MessageHub.Channels.Smpp;
 
 /// <summary>
 /// Configuration settings for SMPP channel

@@ -1,4 +1,4 @@
-namespace MessageHub.SmppChannel;
+namespace MessageHub.Channels.Smpp;
 
 /// <summary>
 /// Represents a message to be sent via SMPP channel

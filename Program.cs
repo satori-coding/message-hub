@@ -2,9 +2,9 @@ using Azure.Extensions.AspNetCore.Configuration.Secrets;
 using Azure.Identity;
 using Microsoft.EntityFrameworkCore;
 using MessageHub;
-using MessageHub.SmppChannel;
-using MessageHub.HttpSmsChannel;
-using MessageHub.Shared;
+using MessageHub.Channels.Smpp;
+using MessageHub.Channels.Http;
+using MessageHub.Channels.Shared;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -46,7 +46,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 builder.Services.AddSmppChannel(builder.Configuration);
 
 // Add HTTP SMS Channel services (with default test configuration)
-var httpSmsConfig = MessageHub.HttpSmsChannel.HttpSmsProviderTemplates.Generic(
+var httpSmsConfig = MessageHub.Channels.Http.HttpSmsProviderTemplates.Generic(
     "TestProvider",
     "https://api.test-sms-provider.com/send", 
     "test-api-key",
@@ -54,17 +54,17 @@ var httpSmsConfig = MessageHub.HttpSmsChannel.HttpSmsProviderTemplates.Generic(
 );
 builder.Services.AddHttpSmsChannel(httpSmsConfig);
 
-// Register all ISmsChannel implementations for multi-channel routing
-builder.Services.AddScoped<IEnumerable<MessageHub.ISmsChannel>>(serviceProvider =>
+// Register all IMessageChannel implementations for multi-channel routing
+builder.Services.AddScoped<IEnumerable<IMessageChannel>>(serviceProvider =>
 {
-    var channels = new List<MessageHub.ISmsChannel>();
+    var channels = new List<IMessageChannel>();
     
     // Add SMPP channel
     var smppChannel = serviceProvider.GetRequiredService<ISmppChannel>();
-    channels.Add((MessageHub.ISmsChannel)smppChannel);
+    channels.Add((IMessageChannel)smppChannel);
     
     // Add HTTP channel
-    var httpChannel = serviceProvider.GetRequiredService<MessageHub.HttpSmsChannel.HttpSmsChannel>();
+    var httpChannel = serviceProvider.GetRequiredService<MessageHub.Channels.Http.HttpSmsChannel>();
     channels.Add(httpChannel);
     
     return channels;

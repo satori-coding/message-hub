@@ -1,9 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
-using MessageHub.Shared;
+using MessageHub.Channels.Shared;
 
-namespace MessageHub.HttpSmsChannel;
+namespace MessageHub.Channels.Http;
 
 /// <summary>
 /// Extension methods for configuring HTTP SMS Channel services

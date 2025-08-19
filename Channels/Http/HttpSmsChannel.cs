@@ -1,8 +1,8 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using MessageHub.Shared;
+using MessageHub.Channels.Shared;
 
-namespace MessageHub.HttpSmsChannel;
+namespace MessageHub.Channels.Http;
 
 /// <summary>
 /// HTTP/REST SMS Channel implementation

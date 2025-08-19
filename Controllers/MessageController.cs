@@ -1,5 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
-using MessageHub.Shared;
+using MessageHub.Channels.Shared;
 
 namespace MessageHub;
 
@@ -31,22 +31,22 @@ public class MessageController : ControllerBase
 
         var response = new SmsStatusResponse
         {
-            Id = smsMessage.Id,
-            PhoneNumber = smsMessage.PhoneNumber,
-            Status = smsMessage.Status.ToString(),
-            CreatedAt = smsMessage.CreatedAt,
-            SentAt = smsMessage.SentAt,
-            UpdatedAt = smsMessage.UpdatedAt,
+            Id = message.Id,
+            PhoneNumber = message.Recipient,
+            Status = message.Status.ToString(),
+            CreatedAt = message.CreatedAt,
+            SentAt = message.SentAt,
+            UpdatedAt = message.UpdatedAt,
             
             // Delivery Receipt Information
-            ProviderMessageId = smsMessage.ProviderMessageId,
-            DeliveredAt = smsMessage.DeliveredAt,
-            DeliveryStatus = smsMessage.DeliveryStatus,
-            ErrorCode = smsMessage.ErrorCode,
-            DeliveryReceiptText = smsMessage.DeliveryReceiptText
+            ProviderMessageId = message.ProviderMessageId,
+            DeliveredAt = message.DeliveredAt,
+            DeliveryStatus = message.DeliveryStatus,
+            ErrorCode = message.ErrorCode,
+            DeliveryReceiptText = message.DeliveryReceiptText
         };
 
-        _logger.LogInformation("Retrieved SMS status for ID: {SmsMessageId}, Status: {Status}", id, smsMessage.Status);
+        _logger.LogInformation("Retrieved SMS status for ID: {MessageId}, Status: {Status}", id, message.Status);
 
         return Ok(response);
     }
@@ -56,23 +56,23 @@ public class MessageController : ControllerBase
     {
         _logger.LogInformation("Getting all SMS messages");
 
-        var smsMessages = await _smsService.GetAllSmsMessagesAsync();
+        var messages = await _messageService.GetAllMessagesAsync();
         
-        var response = smsMessages.Select(sms => new SmsStatusResponse
+        var response = messages.Select(message => new SmsStatusResponse
         {
-            Id = sms.Id,
-            PhoneNumber = sms.PhoneNumber,
-            Status = sms.Status.ToString(),
-            CreatedAt = sms.CreatedAt,
-            SentAt = sms.SentAt,
-            UpdatedAt = sms.UpdatedAt,
+            Id = message.Id,
+            PhoneNumber = message.Recipient,
+            Status = message.Status.ToString(),
+            CreatedAt = message.CreatedAt,
+            SentAt = message.SentAt,
+            UpdatedAt = message.UpdatedAt,
             
             // Delivery Receipt Information
-            ProviderMessageId = sms.ProviderMessageId,
-            DeliveredAt = sms.DeliveredAt,
-            DeliveryStatus = sms.DeliveryStatus,
-            ErrorCode = sms.ErrorCode,
-            DeliveryReceiptText = sms.DeliveryReceiptText
+            ProviderMessageId = message.ProviderMessageId,
+            DeliveredAt = message.DeliveredAt,
+            DeliveryStatus = message.DeliveryStatus,
+            ErrorCode = message.ErrorCode,
+            DeliveryReceiptText = message.DeliveryReceiptText
         }).ToList();
 
         _logger.LogInformation("Retrieved {Count} SMS messages", response.Count);
@@ -102,18 +102,18 @@ public class MessageController : ControllerBase
         {
             // Use specified channel type or default to SMPP
             var channelType = request.ChannelType ?? ChannelType.SMPP;
-            var smsMessage = await _smsService.CreateAndSendSmsAsync(request.PhoneNumber, request.Content, channelType);
+            var message = await _messageService.CreateAndSendMessageAsync(request.PhoneNumber, request.Content, channelType);
             
             var response = new SendSmsResponse
             {
-                Id = smsMessage.Id,
-                PhoneNumber = smsMessage.PhoneNumber,
-                Status = smsMessage.Status.ToString(),
-                CreatedAt = smsMessage.CreatedAt,
+                Id = message.Id,
+                PhoneNumber = message.Recipient,
+                Status = message.Status.ToString(),
+                CreatedAt = message.CreatedAt,
                 Message = "SMS wurde erfolgreich zur Verarbeitung angenommen"
             };
 
-            _logger.LogInformation("SMS request processed successfully with ID: {SmsMessageId}", smsMessage.Id);
+            _logger.LogInformation("SMS request processed successfully with ID: {MessageId}", message.Id);
             
             return Ok(response);
         }

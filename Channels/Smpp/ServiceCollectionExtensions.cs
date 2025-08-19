@@ -2,7 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace MessageHub.SmppChannel;
+namespace MessageHub.Channels.Smpp;
 
 /// <summary>
 /// Extension methods for configuring SMPP channel services

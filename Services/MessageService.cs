@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using MessageHub.SmppChannel;
-using MessageHub.HttpSmsChannel;
-using MessageHub.Shared;
+using MessageHub.Channels.Smpp;
+using MessageHub.Channels.Http;
+using MessageHub.Channels.Shared;
 
 namespace MessageHub;
 
@@ -115,24 +115,24 @@ public class MessageService
                 }
                 else
                 {
-                    _logger.LogError("{ChannelType} send failed for message ID: {SmsMessageId}, Error: {ErrorMessage}", 
-                        smsMessage.ChannelType, smsMessageId, result.ErrorMessage);
+                    _logger.LogError("{ChannelType} send failed for message ID: {MessageId}, Error: {ErrorMessage}", 
+                        message.ChannelType, messageId, result.ErrorMessage);
                     await UpdateMessageStatusAsync(message, MessageStatus.Failed);
                 }
             }
             catch (Exception channelEx)
             {
-                _logger.LogError(channelEx, "{ChannelType} send failed for message ID: {SmsMessageId}", 
-                    smsMessage.ChannelType, smsMessageId);
+                _logger.LogError(channelEx, "{ChannelType} send failed for message ID: {MessageId}", 
+                    message.ChannelType, messageId);
                 await UpdateMessageStatusAsync(message, MessageStatus.Failed);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error sending SMS for message ID: {SmsMessageId}", smsMessageId);
+            _logger.LogError(ex, "Error sending SMS for message ID: {MessageId}", messageId);
             
-            var smsMessage = await _dbContext.SmsMessages.FindAsync(smsMessageId);
-            if (smsMessage != null)
+            var message = await _dbContext.Messages.FindAsync(messageId);
+            if (message != null)
             {
                 await UpdateMessageStatusAsync(message, MessageStatus.Failed);
             }
@@ -140,44 +140,44 @@ public class MessageService
         finally
         {
             var duration = DateTime.UtcNow - startTime;
-            _logger.LogInformation("SMS send process completed for message ID: {SmsMessageId} in {Duration}ms", 
-                smsMessageId, duration.TotalMilliseconds);
+            _logger.LogInformation("SMS send process completed for message ID: {MessageId} in {Duration}ms", 
+                messageId, duration.TotalMilliseconds);
         }
     }
 
     /// <summary>
-    /// Updates the SMS status in database
+    /// Updates the message status in database
     /// </summary>
-    private async Task UpdateSmsStatusAsync(SmsMessage smsMessage, SmsStatus status)
+    private async Task UpdateMessageStatusAsync(Message message, MessageStatus status)
     {
-        _logger.LogInformation("Updating SMS message ID {SmsMessageId} status from {OldStatus} to {NewStatus}", 
-            smsMessage.Id, smsMessage.Status, status);
+        _logger.LogInformation("Updating message ID {MessageId} status from {OldStatus} to {NewStatus}", 
+            message.Id, message.Status, status);
 
-        smsMessage.Status = status;
-        smsMessage.UpdatedAt = DateTime.UtcNow;
+        message.Status = status;
+        message.UpdatedAt = DateTime.UtcNow;
 
-        _dbContext.SmsMessages.Update(smsMessage);
+        _dbContext.Messages.Update(message);
         await _dbContext.SaveChangesAsync();
 
-        _logger.LogInformation("SMS message ID {SmsMessageId} status updated successfully", smsMessage.Id);
+        _logger.LogInformation("Message ID {MessageId} status updated successfully", message.Id);
     }
 
     /// <summary>
-    /// Gets an SMS message by ID
+    /// Gets a message by ID
     /// </summary>
-    public async Task<SmsMessage?> GetSmsMessageAsync(int id)
+    public async Task<Message?> GetMessageAsync(int id)
     {
-        _logger.LogInformation("Retrieving SMS message with ID: {SmsMessageId}", id);
-        return await _dbContext.SmsMessages.FindAsync(id);
+        _logger.LogInformation("Retrieving message with ID: {MessageId}", id);
+        return await _dbContext.Messages.FindAsync(id);
     }
 
     /// <summary>
-    /// Gets all SMS messages ordered by creation date
+    /// Gets all messages ordered by creation date
     /// </summary>
-    public async Task<List<SmsMessage>> GetAllSmsMessagesAsync()
+    public async Task<List<Message>> GetAllMessagesAsync()
     {
-        _logger.LogInformation("Retrieving all SMS messages");
-        return await _dbContext.SmsMessages.OrderByDescending(s => s.CreatedAt).ToListAsync();
+        _logger.LogInformation("Retrieving all messages");
+        return await _dbContext.Messages.OrderByDescending(s => s.CreatedAt).ToListAsync();
     }
 
     /// <summary>
@@ -189,39 +189,39 @@ public class MessageService
         {
             _logger.LogInformation("Processing delivery receipt for SMPP message ID: {SmppMessageId}", receipt.SmppMessageId);
 
-            // Find the SMS message by provider message ID
-            var smsMessage = await _dbContext.SmsMessages
+            // Find the message by provider message ID
+            var message = await _dbContext.Messages
                 .FirstOrDefaultAsync(s => s.ProviderMessageId == receipt.SmppMessageId);
 
-            if (smsMessage == null)
+            if (message == null)
             {
-                _logger.LogWarning("SMS message not found for SMPP message ID: {SmppMessageId}", receipt.SmppMessageId);
+                _logger.LogWarning("Message not found for SMPP message ID: {SmppMessageId}", receipt.SmppMessageId);
                 return;
             }
 
-            _logger.LogInformation("Found SMS message ID {SmsMessageId} for SMPP message ID {SmppMessageId}", 
-                smsMessage.Id, receipt.SmppMessageId);
+            _logger.LogInformation("Found message ID {MessageId} for SMPP message ID {SmppMessageId}", 
+                message.Id, receipt.SmppMessageId);
 
-            // Map delivery status to SmsStatus
-            var newStatus = MapDeliveryStatusToSmsStatus(receipt.DeliveryStatus);
+            // Map delivery status to MessageStatus
+            var newStatus = MapDeliveryStatusToMessageStatus(receipt.DeliveryStatus);
             
-            _logger.LogInformation("Updating SMS message ID {SmsMessageId}: {OldStatus} -> {NewStatus} (SMPP: {SmppStatus})",
-                smsMessage.Id, smsMessage.Status, newStatus, receipt.DeliveryStatus);
+            _logger.LogInformation("Updating message ID {MessageId}: {OldStatus} -> {NewStatus} (SMPP: {SmppStatus})",
+                message.Id, message.Status, newStatus, receipt.DeliveryStatus);
 
-            // Update the SMS message with delivery receipt information
-            smsMessage.Status = newStatus;
-            smsMessage.DeliveredAt = receipt.ReceivedAt;
-            smsMessage.DeliveryReceiptText = receipt.ReceiptText;
-            smsMessage.DeliveryStatus = receipt.DeliveryStatus;
-            smsMessage.ErrorCode = receipt.ErrorCode;
-            smsMessage.UpdatedAt = DateTime.UtcNow;
+            // Update the message with delivery receipt information
+            message.Status = newStatus;
+            message.DeliveredAt = receipt.ReceivedAt;
+            message.DeliveryReceiptText = receipt.ReceiptText;
+            message.DeliveryStatus = receipt.DeliveryStatus;
+            message.ErrorCode = receipt.ErrorCode;
+            message.UpdatedAt = DateTime.UtcNow;
 
             // Update database
-            _dbContext.SmsMessages.Update(smsMessage);
+            _dbContext.Messages.Update(message);
             await _dbContext.SaveChangesAsync();
 
-            _logger.LogInformation("Successfully processed delivery receipt for SMS ID {SmsMessageId}: Status={Status}", 
-                smsMessage.Id, smsMessage.Status);
+            _logger.LogInformation("Successfully processed delivery receipt for message ID {MessageId}: Status={Status}", 
+                message.Id, message.Status);
         }
         catch (Exception ex)
         {
@@ -230,21 +230,21 @@ public class MessageService
     }
 
     /// <summary>
-    /// Maps SMPP delivery status to SmsStatus enum
+    /// Maps SMPP delivery status to MessageStatus enum
     /// </summary>
-    private static SmsStatus MapDeliveryStatusToSmsStatus(string deliveryStatus)
+    private static MessageStatus MapDeliveryStatusToMessageStatus(string deliveryStatus)
     {
         return deliveryStatus?.ToUpper() switch
         {
-            "DELIVRD" => SmsStatus.Delivered,    // Message delivered successfully
-            "EXPIRED" => SmsStatus.Expired,      // Message expired before delivery
-            "DELETED" => SmsStatus.Expired,      // Message deleted (treat as expired)
-            "UNDELIV" => SmsStatus.Undelivered,  // Message undelivered
-            "ACCEPTD" => SmsStatus.Accepted,     // Message accepted (intermediate)
-            "UNKNOWN" => SmsStatus.Unknown,      // Unknown delivery status
-            "REJECTD" => SmsStatus.Rejected,     // Message rejected
-            "ENROUTE" => SmsStatus.Sent,         // Message en route (intermediate, keep as Sent)
-            _ => SmsStatus.Unknown
+            "DELIVRD" => MessageStatus.Delivered,    // Message delivered successfully
+            "EXPIRED" => MessageStatus.Expired,      // Message expired before delivery
+            "DELETED" => MessageStatus.Expired,      // Message deleted (treat as expired)
+            "UNDELIV" => MessageStatus.Undelivered,  // Message undelivered
+            "ACCEPTD" => MessageStatus.Accepted,     // Message accepted (intermediate)
+            "UNKNOWN" => MessageStatus.Unknown,      // Unknown delivery status
+            "REJECTD" => MessageStatus.Rejected,     // Message rejected
+            "ENROUTE" => MessageStatus.Sent,         // Message en route (intermediate, keep as Sent)
+            _ => MessageStatus.Unknown
         };
     }
 }

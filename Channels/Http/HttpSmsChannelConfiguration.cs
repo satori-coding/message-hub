@@ -1,4 +1,4 @@
-namespace MessageHub.HttpSmsChannel;
+namespace MessageHub.Channels.Http;
 
 /// <summary>
 /// Configuration for HTTP SMS Channel

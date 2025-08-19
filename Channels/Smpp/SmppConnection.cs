@@ -1,7 +1,7 @@
 using Inetlab.SMPP;
 using Inetlab.SMPP.Common;
 
-namespace MessageHub.SmppChannel;
+namespace MessageHub.Channels.Smpp;
 
 /// <summary>
 /// Represents a pooled SMPP connection
