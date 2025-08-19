@@ -8,6 +8,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MessageHub.SmppChannel", "M
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MessageHub.HttpSmsChannel", "MessageHub.HttpSmsChannel\MessageHub.HttpSmsChannel.csproj", "{BE74EBEB-9A85-4591-8D0C-60F4F7AD37EB}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MessageHub.Shared", "MessageHub.Shared\MessageHub.Shared.csproj", "{A8B3C4D5-E6F7-4A5B-9C8D-7E6F5A4B3C2D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -26,6 +28,10 @@ Global
 		{BE74EBEB-9A85-4591-8D0C-60F4F7AD37EB}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{BE74EBEB-9A85-4591-8D0C-60F4F7AD37EB}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{BE74EBEB-9A85-4591-8D0C-60F4F7AD37EB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A8B3C4D5-E6F7-4A5B-9C8D-7E6F5A4B3C2D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A8B3C4D5-E6F7-4A5B-9C8D-7E6F5A4B3C2D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A8B3C4D5-E6F7-4A5B-9C8D-7E6F5A4B3C2D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A8B3C4D5-E6F7-4A5B-9C8D-7E6F5A4B3C2D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
