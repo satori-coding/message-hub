@@ -80,15 +80,17 @@ public class MessageResult
 /// </summary>
 public enum MessageStatus
 {
-    Pending,      // Message created but not yet sent
-    Sent,         // Message submitted to provider (not final - waiting for DLR)
-    Failed,       // Message submission failed
-    Delivered,    // DLR: Message successfully delivered to recipient
-    Expired,      // DLR: Message expired before delivery
-    Rejected,     // DLR: Message rejected by network/recipient
-    Undelivered,  // DLR: Message could not be delivered
-    Unknown,      // DLR: Delivery status unknown
-    Accepted      // DLR: Message accepted but delivery status unclear
+    Pending,         // Message created but not yet sent
+    Sent,           // Message submitted to provider (waiting for DLR)
+    Failed,         // Message submission failed
+    Delivered,      // DLR: Message successfully delivered to recipient
+    AssumedDelivered, // No DLR received, but assumed delivered after timeout
+    DeliveryUnknown, // DLR timeout exceeded, delivery status unclear
+    Expired,        // DLR: Message expired before delivery
+    Rejected,       // DLR: Message rejected by network/recipient
+    Undelivered,    // DLR: Message could not be delivered
+    Unknown,        // DLR: Delivery status unknown
+    Accepted        // DLR: Message accepted but delivery status unclear
 }
 
 /// <summary>

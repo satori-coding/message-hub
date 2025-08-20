@@ -1,3 +1,5 @@
+using MessageHub.Channels.Shared;
+
 namespace MessageHub.Channels.Smpp;
 
 /// <summary>
@@ -12,6 +14,21 @@ public class SmppChannelConfiguration
     public int MaxConnections { get; set; } = 3;
     public TimeSpan KeepAliveInterval { get; set; } = TimeSpan.FromSeconds(30);
     public TimeSpan ConnectionTimeout { get; set; } = TimeSpan.FromSeconds(30);
+    
+    /// <summary>
+    /// Whether this SMPP provider supports and sends delivery receipts
+    /// </summary>
+    public bool ExpectDeliveryReceipts { get; set; } = true;
+    
+    /// <summary>
+    /// How long to wait for a DLR before assuming delivery (minutes)
+    /// </summary>
+    public int DeliveryReceiptTimeoutMinutes { get; set; } = 30;
+    
+    /// <summary>
+    /// Status to set when DLR timeout is reached
+    /// </summary>
+    public MessageStatus TimeoutStatus { get; set; } = MessageStatus.AssumedDelivered;
     
     /// <summary>
     /// Validates the configuration

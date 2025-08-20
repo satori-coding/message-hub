@@ -73,6 +73,9 @@ builder.Services.AddScoped<IEnumerable<IMessageChannel>>(serviceProvider =>
 // Add Message Service
 builder.Services.AddScoped<MessageService>();
 
+// Add Background Services
+builder.Services.AddHostedService<MessageHub.Services.MessageCleanupService>();
+
 var app = builder.Build();
 
 // Configure SMPP channel delivery receipt handling

@@ -33,7 +33,7 @@ public class MessageController : ControllerBase
         {
             Id = message.Id,
             PhoneNumber = message.Recipient,
-            Status = message.Status.ToString(),
+            Status = GetDisplayStatus(message), // Enhanced status display
             CreatedAt = message.CreatedAt,
             SentAt = message.SentAt,
             UpdatedAt = message.UpdatedAt,
@@ -62,7 +62,7 @@ public class MessageController : ControllerBase
         {
             Id = message.Id,
             PhoneNumber = message.Recipient,
-            Status = message.Status.ToString(),
+            Status = GetDisplayStatus(message), // Enhanced status display
             CreatedAt = message.CreatedAt,
             SentAt = message.SentAt,
             UpdatedAt = message.UpdatedAt,
@@ -108,7 +108,7 @@ public class MessageController : ControllerBase
             {
                 Id = message.Id,
                 PhoneNumber = message.Recipient,
-                Status = message.Status.ToString(),
+                Status = GetDisplayStatus(message), // Enhanced status display
                 CreatedAt = message.CreatedAt,
                 Message = "Nachricht wurde erfolgreich zur Verarbeitung angenommen"
             };
@@ -122,6 +122,18 @@ public class MessageController : ControllerBase
             _logger.LogError(ex, "Error processing message send request");
             return StatusCode(500, "Fehler beim Verarbeiten der Nachrichten-Anfrage");
         }
+    }
+
+    private string GetDisplayStatus(Message message)
+    {
+        return message.Status switch
+        {
+            MessageStatus.Sent => "Sent (DLR pending)",
+            MessageStatus.AssumedDelivered => "Assumed Delivered (no DLR received)",
+            MessageStatus.DeliveryUnknown => "Delivery Unknown (DLR timeout)",
+            MessageStatus.Delivered => "Delivered (confirmed)",
+            _ => message.Status.ToString()
+        };
     }
 }
 
