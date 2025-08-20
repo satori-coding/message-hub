@@ -371,15 +371,19 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
             }
             _logger.LogInformation("Connected to SMPP server {Host}:{Port}", _configuration.Host, _configuration.Port);
 
-            // Bind as transmitter (send only, simpler than transceiver)
-            var bindResp = await Task.Run(() => client.Bind(_configuration.SystemId, _configuration.Password, ConnectionMode.Transmitter));
+            // Register delivery receipt event handler BEFORE binding
+            client.evDeliverSm += OnDeliveryReceiptHandler;
+            _logger.LogDebug("Registered evDeliverSm event handler for DLR processing");
+
+            // Bind as transceiver (send and receive DLRs)
+            var bindResp = await Task.Run(() => client.Bind(_configuration.SystemId, _configuration.Password, ConnectionMode.Transceiver));
 
             if (bindResp.Header.Status != CommandStatus.ESME_ROK)
             {
                 throw new InvalidOperationException($"SMPP bind failed with status: {bindResp.Header.Status}");
             }
 
-            _logger.LogInformation("Successfully bound to SMPP server as transmitter");
+            _logger.LogInformation("Successfully bound to SMPP server as transceiver with DLR handling enabled");
 
             return new SmppConnection(client);
         }
