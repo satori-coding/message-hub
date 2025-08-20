@@ -105,6 +105,7 @@ public enum MessageStatus
     Sent,           // Message submitted to provider (waiting for DLR)
     Failed,         // Message submission failed
     Delivered,      // DLR: Message successfully delivered to recipient
+    PartiallyDelivered, // NEW: Some SMS parts delivered, others pending/failed (SMPP multi-part)
     AssumedDelivered, // No DLR received, but assumed delivered after timeout
     DeliveryUnknown, // DLR timeout exceeded, delivery status unclear
     Expired,        // DLR: Message expired before delivery
@@ -112,6 +113,34 @@ public enum MessageStatus
     Undelivered,    // DLR: Message could not be delivered
     Unknown,        // DLR: Delivery status unknown
     Accepted        // DLR: Message accepted but delivery status unclear
+}
+
+/// <summary>
+/// MessagePart entity for tracking individual SMS parts in multi-part messages (SMPP channels)
+/// </summary>
+public class MessagePart
+{
+    public int Id { get; set; }
+    public int MessageId { get; set; }                          // FK to Message
+    public Message Message { get; set; } = null!;              // Navigation property
+    
+    // SMS Part Identification
+    public string ProviderMessageId { get; set; } = string.Empty;  // SMPP message ID for this part
+    public int PartNumber { get; set; }                         // 1, 2, 3, etc.
+    public int TotalParts { get; set; }                         // Total parts in message
+    
+    // Per-Part Status Tracking
+    public MessageStatus Status { get; set; } = MessageStatus.Pending;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? SentAt { get; set; }
+    public DateTime? DeliveredAt { get; set; }
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    
+    // Per-Part Delivery Receipt Data
+    public string? DeliveryReceiptText { get; set; }            // Raw DLR text for this part
+    public string? DeliveryStatus { get; set; }                // DELIVRD, ACCEPTD, etc.
+    public int? ErrorCode { get; set; }                        // Provider error code
+    public int? NetworkErrorCode { get; set; }                 // Network error code
 }
 
 /// <summary>
@@ -140,5 +169,37 @@ public class Message
     public string? DeliveryStatus { get; set; }       // Provider delivery status (DELIVRD, delivered, failed, etc.)
     public int? ErrorCode { get; set; }               // Provider error code (SMPP error code, HTTP error code, etc.)
     public int? NetworkErrorCode { get; set; }        // Network-specific error code (HTTP status codes, network errors)
+    
+    // SMPP Multi-Part Support (Navigation Property)
+    public List<MessagePart> Parts { get; set; } = new();
+    
+    // Computed Properties
+    /// <summary>
+    /// Check if this message has SMS parts (SMPP multi-part)
+    /// </summary>
+    public bool HasParts => Parts.Any();
+    
+    /// <summary>
+    /// Compute overall status from individual SMS parts (SMPP) or return main Status (HTTP)
+    /// </summary>
+    public MessageStatus OverallStatus 
+    { 
+        get 
+        {
+            // HTTP channels: Use main Status field
+            if (!HasParts) return Status; 
+            
+            // SMPP channels: Aggregate status from parts
+            if (Parts.All(p => p.Status == MessageStatus.Delivered))
+                return MessageStatus.Delivered;
+            if (Parts.All(p => p.Status == MessageStatus.Failed))
+                return MessageStatus.Failed;
+            if (Parts.Any(p => p.Status == MessageStatus.Delivered))
+                return MessageStatus.PartiallyDelivered;
+                
+            // All parts have same status (Pending, Sent, etc.)
+            return Parts.First().Status;
+        }
+    }
 }
 

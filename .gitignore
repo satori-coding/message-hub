@@ -11,12 +11,6 @@
 *.sln.docstates
 *.env
 
-# === SMS Service Specific Files ===
-# Database files
-*.db
-*.db-shm
-*.db-wal
-sms_database.db
 
 # Configuration files with sensitive data
 appsettings.Development.json
