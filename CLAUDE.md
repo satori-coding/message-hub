@@ -422,6 +422,77 @@ public enum MessageStatus
 - ✅ **Configurable Behavior**: Per-provider/environment configuration
 - ✅ **Industry Standard**: Similar to Twilio, AWS SNS, Azure SMS approaches
 
+## SMPP Timeout System (NEW 2025-08-20)
+
+### 🕒 **Comprehensive Timeout Handling**
+
+The MessageHub SMS service includes a robust multi-level timeout system that prevents infinite waits when SMPP servers are unresponsive, addressing the user-reported issue where "der call sehr lange wartet wis er abbricht. In Postman fühlt es sich an wie unendlich."
+
+#### **Problem Solved**
+SMPP connections could hang indefinitely when servers are unresponsive or network issues occur, causing API requests to appear to "wait forever" in clients like Postman.
+
+#### **Solution: Multi-Level Timeout Architecture**
+
+### **Timeout Levels**
+```csharp
+public class SmppChannelConfiguration
+{
+    // Level 1: TCP Connection timeout (30s default)
+    public TimeSpan ConnectionTimeout { get; set; } = TimeSpan.FromSeconds(30);
+    
+    // Level 2: SMPP Bind timeout (15s default) 
+    public TimeSpan BindTimeout { get; set; } = TimeSpan.FromSeconds(15);
+    
+    // Level 3: SMS Submit timeout (10s default)
+    public TimeSpan SubmitTimeout { get; set; } = TimeSpan.FromSeconds(10);
+    
+    // Level 4: Overall API timeout (45s default)
+    public TimeSpan ApiTimeout { get; set; } = TimeSpan.FromSeconds(45);
+}
+```
+
+### **Configuration Examples**
+```json
+"SmppSettings": {
+  "Host": "localhost",
+  "Port": 2775,
+  "ConnectionTimeout": "00:00:30",    // 30s for initial TCP connection
+  "BindTimeout": "00:00:15",          // 15s for SMPP authentication
+  "SubmitTimeout": "00:00:10",        // 10s for SMS submission
+  "ApiTimeout": "00:00:45"            // 45s total API operation limit
+}
+```
+
+### **Timeout Behavior**
+1. **Connection Timeout**: TCP connection establishment to SMPP server
+   - **Triggers**: Network unreachable, server down, firewall blocking
+   - **Logging**: `"SMPP connection timed out after 30s to host:port"`
+
+2. **Bind Timeout**: SMPP authentication with credentials
+   - **Triggers**: Server accepts connection but doesn't respond to bind
+   - **Logging**: `"SMPP bind timed out after 15s to host:port with SystemId: xxx"`
+
+3. **Submit Timeout**: Individual SMS submission operations
+   - **Triggers**: Server bound but doesn't respond to submit_sm
+   - **Logging**: `"SMPP submit timed out after 10s on attempt X for +49123456789"`
+
+4. **API Timeout**: Overall operation timeout (prevents infinite client waits)
+   - **Triggers**: Total operation exceeds limit (includes retries)
+   - **Logging**: `"SMPP API timeout after 45s for +49123456789 (actual duration: 45052ms)"`
+
+### **Comprehensive Error Responses**
+- **Fast Failures**: All timeouts result in immediate "Failed" status
+- **Clear Error Messages**: Specific timeout information in API responses
+- **Client Protection**: No infinite waits - maximum 45 seconds total
+- **Retry Logic**: Automatic retries with fresh connections on timeout
+
+### **Test Results (2025-08-20)**
+✅ **Verified with SMPP Simulator Offline**:
+- Connection timeout: 30s → "Connect returned false"
+- API timeout: 45s → "SMPP API timeout after 45s"
+- Client response: Immediate "Failed" status after exactly 45 seconds
+- No infinite waits or hanging requests
+
 ## Development Environment
 
 - **HTTPS**: `https://localhost:7142` (redirects from HTTP)

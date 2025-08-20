@@ -131,13 +131,14 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
                         
                         return connection.Client.Submit(smsBuilder);
                     });
-                    var timeoutTask = Task.Delay(TimeSpan.FromSeconds(5)); // 5 second timeout
+                    var timeoutTask = Task.Delay(_configuration.SubmitTimeout); // Configurable submit timeout
                     
                     var completedTask = await Task.WhenAny(submitTask, timeoutTask);
                     
                     if (completedTask == timeoutTask)
                     {
-                        _logger.LogWarning("Submit timed out on attempt {Retry}", retryCount + 1);
+                        _logger.LogWarning("SMPP submit timed out after {Timeout}s on attempt {Retry} for {PhoneNumber}", 
+                            _configuration.SubmitTimeout.TotalSeconds, retryCount + 1, message.PhoneNumber);
                         
                         if (retryCount < maxRetries)
                         {
@@ -148,7 +149,7 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
                         }
                         else
                         {
-                            return SmppSendResult.Failure("Submit timed out after multiple attempts");
+                            return SmppSendResult.Failure($"Submit timed out after {maxRetries + 1} attempts ({_configuration.SubmitTimeout.TotalSeconds}s each)");
                         }
                     }
                     
@@ -320,10 +321,24 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
         try
         {
             if (!connection.IsHealthy)
+            {
+                _logger.LogDebug("Connection marked as unhealthy");
                 return false;
+            }
 
-            // Test connection with EnquireLink
-            await Task.Run(() => connection.Client.EnquireLink());
+            // Test connection with EnquireLink with timeout
+            var enquireLinkTask = Task.Run(() => connection.Client.EnquireLink());
+            var timeoutTask = Task.Delay(TimeSpan.FromSeconds(5)); // Health check timeout
+            
+            var completedTask = await Task.WhenAny(enquireLinkTask, timeoutTask);
+            
+            if (completedTask == timeoutTask)
+            {
+                _logger.LogDebug("Connection health validation timed out after 5s");
+                return false;
+            }
+            
+            await enquireLinkTask; // Get any potential exception
             _logger.LogDebug("Connection health validation successful");
             return true;
         }
@@ -371,30 +386,72 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
     private async Task<SmppConnection> CreateConnectionAsync()
     {
         var client = new SmppClient();
+        var startTime = DateTime.UtcNow;
         
         try
         {
-            // Connect to SMPP server
-            var connected = await Task.Run(() => client.Connect(_configuration.Host, _configuration.Port));
+            _logger.LogInformation("Starting SMPP connection to {Host}:{Port} (Connection timeout: {ConnectionTimeout}s, Bind timeout: {BindTimeout}s)", 
+                _configuration.Host, _configuration.Port, _configuration.ConnectionTimeout.TotalSeconds, _configuration.BindTimeout.TotalSeconds);
+            
+            // Connect to SMPP server with timeout
+            var connectTask = Task.Run(() => client.Connect(_configuration.Host, _configuration.Port));
+            var timeoutTask = Task.Delay(_configuration.ConnectionTimeout);
+            
+            var completedTask = await Task.WhenAny(connectTask, timeoutTask);
+            
+            if (completedTask == timeoutTask)
+            {
+                _logger.LogError("SMPP connection timed out after {Timeout}s to {Host}:{Port}", 
+                    _configuration.ConnectionTimeout.TotalSeconds, _configuration.Host, _configuration.Port);
+                client.Dispose();
+                throw new TimeoutException($"SMPP connection timed out after {_configuration.ConnectionTimeout.TotalSeconds}s to {_configuration.Host}:{_configuration.Port}");
+            }
+            
+            var connected = await connectTask;
             if (!connected)
             {
-                throw new InvalidOperationException($"Failed to connect to SMPP server {_configuration.Host}:{_configuration.Port}");
+                _logger.LogError("SMPP connection failed to {Host}:{Port} - Connect returned false", _configuration.Host, _configuration.Port);
+                client.Dispose();
+                throw new InvalidOperationException($"Failed to connect to SMPP server {_configuration.Host}:{_configuration.Port} - Connection rejected");
             }
-            _logger.LogInformation("Connected to SMPP server {Host}:{Port}", _configuration.Host, _configuration.Port);
+            
+            var connectDuration = DateTime.UtcNow - startTime;
+            _logger.LogInformation("Connected to SMPP server {Host}:{Port} in {Duration}ms", 
+                _configuration.Host, _configuration.Port, connectDuration.TotalMilliseconds);
 
             // Register delivery receipt event handler BEFORE binding
             client.evDeliverSm += OnDeliveryReceiptHandler;
             _logger.LogDebug("Registered evDeliverSm event handler for DLR processing");
 
-            // Bind as transceiver (send and receive DLRs)
-            var bindResp = await Task.Run(() => client.Bind(_configuration.SystemId, _configuration.Password, ConnectionMode.Transceiver));
-
+            // Bind as transceiver (send and receive DLRs) with timeout
+            var bindStart = DateTime.UtcNow;
+            var bindTask = Task.Run(() => client.Bind(_configuration.SystemId, _configuration.Password, ConnectionMode.Transceiver));
+            var bindTimeoutTask = Task.Delay(_configuration.BindTimeout);
+            
+            var bindCompletedTask = await Task.WhenAny(bindTask, bindTimeoutTask);
+            
+            if (bindCompletedTask == bindTimeoutTask)
+            {
+                _logger.LogError("SMPP bind timed out after {Timeout}s to {Host}:{Port} with SystemId: {SystemId}", 
+                    _configuration.BindTimeout.TotalSeconds, _configuration.Host, _configuration.Port, _configuration.SystemId);
+                client.Dispose();
+                throw new TimeoutException($"SMPP bind timed out after {_configuration.BindTimeout.TotalSeconds}s to {_configuration.Host}:{_configuration.Port}");
+            }
+            
+            var bindResp = await bindTask;
+            
             if (bindResp.Header.Status != CommandStatus.ESME_ROK)
             {
+                _logger.LogError("SMPP bind failed with status: {Status} to {Host}:{Port} with SystemId: {SystemId}", 
+                    bindResp.Header.Status, _configuration.Host, _configuration.Port, _configuration.SystemId);
+                client.Dispose();
                 throw new InvalidOperationException($"SMPP bind failed with status: {bindResp.Header.Status}");
             }
 
-            _logger.LogInformation("Successfully bound to SMPP server as transceiver with DLR handling enabled");
+            var bindDuration = DateTime.UtcNow - bindStart;
+            var totalDuration = DateTime.UtcNow - startTime;
+            _logger.LogInformation("Successfully bound to SMPP server as transceiver with DLR handling enabled. Bind: {BindDuration}ms, Total: {TotalDuration}ms", 
+                bindDuration.TotalMilliseconds, totalDuration.TotalMilliseconds);
 
             return new SmppConnection(client);
         }
@@ -554,44 +611,88 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
     // IMessageChannel implementation
     async Task<MessageResult> IMessageChannel.SendAsync(Message message)
     {
-        // Convert Message to SmppMessage
-        var smppMessage = new SmppMessage
+        var startTime = DateTime.UtcNow;
+        
+        try
         {
-            PhoneNumber = message.Recipient,
-            Content = message.Content,
-            From = "MessageHub",
-            RequestDeliveryReceipt = true
-        };
-
-        // Call the existing SMPP implementation
-        var smppResult = await SendSmsAsync(smppMessage);
-
-        // Convert SmppSendResult to MessageResult
-        if (smppResult.IsSuccess)
-        {
-            var channelData = new Dictionary<string, object>
+            _logger.LogInformation("Starting SMPP send operation for {PhoneNumber} (API timeout: {ApiTimeout}s)", 
+                message.Recipient, _configuration.ApiTimeout.TotalSeconds);
+            
+            // Convert Message to SmppMessage
+            var smppMessage = new SmppMessage
             {
-                ["SmppMessageId"] = smppResult.SmppMessageId ?? "",
-                ["SmppMessageIds"] = smppResult.SmppMessageIds,
-                ["MessageParts"] = smppResult.MessageParts,
-                ["ChannelType"] = "SMPP"
+                PhoneNumber = message.Recipient,
+                Content = message.Content,
+                From = "MessageHub",
+                RequestDeliveryReceipt = true
             };
 
-            // Return appropriate result based on number of parts
-            if (smppResult.MessageParts == 1)
+            // Call the existing SMPP implementation with overall API timeout
+            var sendTask = SendSmsAsync(smppMessage);
+            var apiTimeoutTask = Task.Delay(_configuration.ApiTimeout);
+            
+            var completedTask = await Task.WhenAny(sendTask, apiTimeoutTask);
+            
+            if (completedTask == apiTimeoutTask)
             {
-                return MessageResult.CreateSuccess(smppResult.SmppMessageId ?? "", channelData);
+                var duration = DateTime.UtcNow - startTime;
+                _logger.LogError("SMPP API timeout after {ApiTimeout}s for {PhoneNumber} (actual duration: {ActualDuration}ms)", 
+                    _configuration.ApiTimeout.TotalSeconds, message.Recipient, duration.TotalMilliseconds);
+                    
+                return MessageResult.CreateFailure(
+                    $"SMPP API timeout after {_configuration.ApiTimeout.TotalSeconds}s",
+                    errorCode: -1 // Timeout error code
+                );
+            }
+            
+            var smppResult = await sendTask;
+            var totalDuration = DateTime.UtcNow - startTime;
+            
+            // Convert SmppSendResult to MessageResult
+            if (smppResult.IsSuccess)
+            {
+                _logger.LogInformation("SMPP send operation completed successfully for {PhoneNumber} in {Duration}ms", 
+                    message.Recipient, totalDuration.TotalMilliseconds);
+                    
+                var channelData = new Dictionary<string, object>
+                {
+                    ["SmppMessageId"] = smppResult.SmppMessageId ?? "",
+                    ["SmppMessageIds"] = smppResult.SmppMessageIds,
+                    ["MessageParts"] = smppResult.MessageParts,
+                    ["ChannelType"] = "SMPP",
+                    ["Duration"] = totalDuration.TotalMilliseconds
+                };
+
+                // Return appropriate result based on number of parts
+                if (smppResult.MessageParts == 1)
+                {
+                    return MessageResult.CreateSuccess(smppResult.SmppMessageId ?? "", channelData);
+                }
+                else
+                {
+                    return MessageResult.CreateSuccessMultiPart(smppResult.SmppMessageIds, channelData);
+                }
             }
             else
             {
-                return MessageResult.CreateSuccessMultiPart(smppResult.SmppMessageIds, channelData);
+                _logger.LogWarning("SMPP send operation failed for {PhoneNumber} in {Duration}ms: {ErrorMessage}", 
+                    message.Recipient, totalDuration.TotalMilliseconds, smppResult.ErrorMessage);
+                    
+                return MessageResult.CreateFailure(
+                    smppResult.ErrorMessage ?? "Unknown SMPP error",
+                    smppResult.Exception?.HResult
+                );
             }
         }
-        else
+        catch (Exception ex)
         {
+            var duration = DateTime.UtcNow - startTime;
+            _logger.LogError(ex, "SMPP send operation exception for {PhoneNumber} after {Duration}ms: {ErrorMessage}", 
+                message.Recipient, duration.TotalMilliseconds, ex.Message);
+                
             return MessageResult.CreateFailure(
-                smppResult.ErrorMessage ?? "Unknown SMPP error",
-                smppResult.Exception?.HResult
+                $"SMPP error: {ex.Message}",
+                ex.HResult
             );
         }
     }

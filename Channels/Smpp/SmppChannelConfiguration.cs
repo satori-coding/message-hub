@@ -16,6 +16,21 @@ public class SmppChannelConfiguration
     public TimeSpan ConnectionTimeout { get; set; } = TimeSpan.FromSeconds(30);
     
     /// <summary>
+    /// Timeout for SMPP bind operation (authentication)
+    /// </summary>
+    public TimeSpan BindTimeout { get; set; } = TimeSpan.FromSeconds(15);
+    
+    /// <summary>
+    /// Timeout for individual SMS submit operations
+    /// </summary>
+    public TimeSpan SubmitTimeout { get; set; } = TimeSpan.FromSeconds(10);
+    
+    /// <summary>
+    /// Overall API request timeout (covers entire send operation)
+    /// </summary>
+    public TimeSpan ApiTimeout { get; set; } = TimeSpan.FromSeconds(45);
+    
+    /// <summary>
     /// Whether this SMPP provider supports and sends delivery receipts
     /// </summary>
     public bool ExpectDeliveryReceipts { get; set; } = true;
