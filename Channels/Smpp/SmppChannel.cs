@@ -84,7 +84,7 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
                 }
             }
 
-            // Build SMS submit request
+            // Build message submit request
             var sms = SMS.ForSubmit()
                 .From(message.From)
                 .To(message.PhoneNumber.TrimStart('+'))
@@ -96,7 +96,7 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
                 sms = sms.DeliveryReceipt();
             }
 
-            _logger.LogDebug("SMS submit prepared. From={From}, To={To}, ContentLength={ContentLength}", 
+            _logger.LogDebug("Message submit prepared. From={From}, To={To}, ContentLength={ContentLength}", 
                 message.From, message.PhoneNumber, message.Content.Length);
 
             // Submit with retry logic and timeout handling
@@ -216,7 +216,7 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
             }
 
             var smppMessageId = submitResponses.First().MessageId;
-            _logger.LogInformation("SMS submitted successfully via SMPP. Message ID: {SmppMessageId} for {PhoneNumber}", 
+            _logger.LogInformation("Message submitted successfully via SMPP. Message ID: {SmppMessageId} for {PhoneNumber}", 
                 smppMessageId, message.PhoneNumber);
 
             _logger.LogDebug("SMPP client status after submit: {Status}", connection.Client.Status);
@@ -225,7 +225,7 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error sending SMS to {PhoneNumber}", message.PhoneNumber);
+            _logger.LogError(ex, "Error sending message to {PhoneNumber}", message.PhoneNumber);
             return SmppSendResult.Failure($"SMPP send failed: {ex.Message}", ex);
         }
         finally
@@ -434,8 +434,8 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
             }
             else
             {
-                // This is a mobile-originated (MO) SMS, not a delivery receipt
-                _logger.LogDebug("Received MO SMS from {SourceAddr} (not a delivery receipt)", deliverSm.SourceAddress.Address);
+                // This is a mobile-originated (MO) message, not a delivery receipt
+                _logger.LogDebug("Received MO message from {SourceAddr} (not a delivery receipt)", deliverSm.SourceAddress.Address);
             }
         }
         catch (Exception ex)

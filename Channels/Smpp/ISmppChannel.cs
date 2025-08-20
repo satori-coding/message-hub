@@ -12,7 +12,7 @@ public class SmppMessage
 }
 
 /// <summary>
-/// Result of sending an SMS via SMPP channel
+/// Result of sending a message via SMPP channel
 /// </summary>
 public class SmppSendResult
 {
@@ -60,7 +60,7 @@ public class SmppDeliveryReceipt
 public interface ISmppChannel
 {
     /// <summary>
-    /// Sends an SMS message via SMPP
+    /// Sends a message via SMPP
     /// </summary>
     Task<SmppSendResult> SendSmsAsync(SmppMessage message);
 

@@ -52,14 +52,14 @@ public class MessageService
 
         _logger.LogInformation("Message created with ID: {MessageId}", message.Id);
 
-        // Send SMS via specified channel
+        // Send message via specified channel
         await SendMessageAsync(message.Id);
 
         return message;
     }
 
     /// <summary>
-    /// Sends an SMS message by ID via the channel specified in the message
+    /// Sends a message by ID via the channel specified in the message
     /// </summary>
     public async Task SendMessageAsync(int messageId)
     {
@@ -76,7 +76,7 @@ public class MessageService
                 return;
             }
 
-            _logger.LogInformation("Found SMS message: Phone={PhoneNumber}, Content length={ContentLength}", 
+            _logger.LogInformation("Found message: Phone={PhoneNumber}, Content length={ContentLength}", 
                 message.Recipient, message.Content.Length);
 
             try
@@ -90,7 +90,7 @@ public class MessageService
                     return;
                 }
 
-                _logger.LogInformation("Sending SMS via {ChannelType} channel ({ProviderName}) to {PhoneNumber}", 
+                _logger.LogInformation("Sending message via {ChannelType} channel ({ProviderName}) to {PhoneNumber}", 
                     message.ChannelType, channel.ProviderName, message.Recipient);
 
                 // Send via the selected channel
@@ -129,7 +129,7 @@ public class MessageService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error sending SMS for message ID: {MessageId}", messageId);
+            _logger.LogError(ex, "Error sending message for message ID: {MessageId}", messageId);
             
             var message = await _dbContext.Messages.FindAsync(messageId);
             if (message != null)
@@ -140,7 +140,7 @@ public class MessageService
         finally
         {
             var duration = DateTime.UtcNow - startTime;
-            _logger.LogInformation("SMS send process completed for message ID: {MessageId} in {Duration}ms", 
+            _logger.LogInformation("Message send process completed for message ID: {MessageId} in {Duration}ms", 
                 messageId, duration.TotalMilliseconds);
         }
     }

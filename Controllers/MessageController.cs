@@ -17,19 +17,19 @@ public class MessageController : ControllerBase
     }
 
     [HttpGet("{id}/status")]
-    public async Task<ActionResult<SmsStatusResponse>> GetSmsStatus(int id)
+    public async Task<ActionResult<MessageStatusResponse>> GetMessageStatus(int id)
     {
-        _logger.LogInformation("Getting SMS status for ID: {SmsMessageId}", id);
+        _logger.LogInformation("Getting message status for ID: {MessageId}", id);
 
         var message = await _messageService.GetMessageAsync(id);
         
         if (message == null)
         {
-            _logger.LogWarning("SMS message with ID {SmsMessageId} not found", id);
-            return NotFound($"SMS message with ID {id} not found");
+            _logger.LogWarning("Message with ID {MessageId} not found", id);
+            return NotFound($"Message with ID {id} not found");
         }
 
-        var response = new SmsStatusResponse
+        var response = new MessageStatusResponse
         {
             Id = message.Id,
             PhoneNumber = message.Recipient,
@@ -46,19 +46,19 @@ public class MessageController : ControllerBase
             DeliveryReceiptText = message.DeliveryReceiptText
         };
 
-        _logger.LogInformation("Retrieved SMS status for ID: {MessageId}, Status: {Status}", id, message.Status);
+        _logger.LogInformation("Retrieved message status for ID: {MessageId}, Status: {Status}", id, message.Status);
 
         return Ok(response);
     }
 
     [HttpGet]
-    public async Task<ActionResult<List<SmsStatusResponse>>> GetAllSmsMessages()
+    public async Task<ActionResult<List<MessageStatusResponse>>> GetAllMessages()
     {
-        _logger.LogInformation("Getting all SMS messages");
+        _logger.LogInformation("Getting all messages");
 
         var messages = await _messageService.GetAllMessagesAsync();
         
-        var response = messages.Select(message => new SmsStatusResponse
+        var response = messages.Select(message => new MessageStatusResponse
         {
             Id = message.Id,
             PhoneNumber = message.Recipient,
@@ -75,27 +75,27 @@ public class MessageController : ControllerBase
             DeliveryReceiptText = message.DeliveryReceiptText
         }).ToList();
 
-        _logger.LogInformation("Retrieved {Count} SMS messages", response.Count);
+        _logger.LogInformation("Retrieved {Count} messages", response.Count);
 
         return Ok(response);
     }
 
     [HttpPost("send")]
-    public async Task<ActionResult<SendSmsResponse>> SendSms([FromBody] SendSmsRequest request)
+    public async Task<ActionResult<SendMessageResponse>> SendMessage([FromBody] SendMessageRequest request)
     {
-        _logger.LogInformation("Received request to send SMS to {PhoneNumber} via {ChannelType} channel", 
+        _logger.LogInformation("Received request to send message to {PhoneNumber} via {ChannelType} channel", 
             request.PhoneNumber, request.ChannelType ?? ChannelType.SMPP);
 
         if (string.IsNullOrWhiteSpace(request.PhoneNumber) || string.IsNullOrWhiteSpace(request.Content))
         {
-            _logger.LogWarning("Invalid SMS request: PhoneNumber or Content is empty");
+            _logger.LogWarning("Invalid message request: PhoneNumber or Content is empty");
             return BadRequest("PhoneNumber and Content are required");
         }
 
         if (request.Content.Length > 1000)
         {
-            _logger.LogWarning("SMS content too long: {Length} characters", request.Content.Length);
-            return BadRequest("SMS content cannot exceed 1000 characters");
+            _logger.LogWarning("Message content too long: {Length} characters", request.Content.Length);
+            return BadRequest("Message content cannot exceed 1000 characters");
         }
 
         try
@@ -104,28 +104,28 @@ public class MessageController : ControllerBase
             var channelType = request.ChannelType ?? ChannelType.SMPP;
             var message = await _messageService.CreateAndSendMessageAsync(request.PhoneNumber, request.Content, channelType);
             
-            var response = new SendSmsResponse
+            var response = new SendMessageResponse
             {
                 Id = message.Id,
                 PhoneNumber = message.Recipient,
                 Status = message.Status.ToString(),
                 CreatedAt = message.CreatedAt,
-                Message = "SMS wurde erfolgreich zur Verarbeitung angenommen"
+                Message = "Nachricht wurde erfolgreich zur Verarbeitung angenommen"
             };
 
-            _logger.LogInformation("SMS request processed successfully with ID: {MessageId}", message.Id);
+            _logger.LogInformation("Message request processed successfully with ID: {MessageId}", message.Id);
             
             return Ok(response);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing SMS send request");
-            return StatusCode(500, "Fehler beim Verarbeiten der SMS-Anfrage");
+            _logger.LogError(ex, "Error processing message send request");
+            return StatusCode(500, "Fehler beim Verarbeiten der Nachrichten-Anfrage");
         }
     }
 }
 
-public class SmsStatusResponse
+public class MessageStatusResponse
 {
     public int Id { get; set; }
     public string PhoneNumber { get; set; } = string.Empty;
@@ -142,14 +142,14 @@ public class SmsStatusResponse
     public string? DeliveryReceiptText { get; set; }
 }
 
-public class SendSmsRequest
+public class SendMessageRequest
 {
     public string PhoneNumber { get; set; } = string.Empty;
     public string Content { get; set; } = string.Empty;
     public ChannelType? ChannelType { get; set; } = null; // Optional channel selection
 }
 
-public class SendSmsResponse
+public class SendMessageResponse
 {
     public int Id { get; set; }
     public string PhoneNumber { get; set; } = string.Empty;

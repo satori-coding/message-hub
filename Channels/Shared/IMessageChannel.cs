@@ -81,7 +81,7 @@ public class MessageResult
 public enum MessageStatus
 {
     Pending,      // Message created but not yet sent
-    Sent,         // Message submitted to SMSC (not final - waiting for DLR)
+    Sent,         // Message submitted to provider (not final - waiting for DLR)
     Failed,       // Message submission failed
     Delivered,    // DLR: Message successfully delivered to recipient
     Expired,      // DLR: Message expired before delivery
