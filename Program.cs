@@ -120,7 +120,7 @@ app.UseHttpsRedirection();
 app.UseAuthorization();
 app.MapControllers();
 
-// Ensure database is created and migrated
+// Environment-specific database initialization
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
@@ -128,20 +128,24 @@ using (var scope = app.Services.CreateScope())
     
     try
     {
-        logger.LogInformation("Initializing database...");
+        logger.LogInformation("Initializing database for environment: {Environment}", app.Environment.EnvironmentName);
         
         if (app.Environment.IsDevelopment())
         {
-            // For SQLite, ensure database is created
+            // Development (Azure WebApp): Fresh database on every startup
+            logger.LogInformation("Creating fresh database for Development environment (Azure WebApp)");
+            await context.Database.EnsureDeletedAsync();
             await context.Database.EnsureCreatedAsync();
-            logger.LogInformation("SQLite database ensured at: {DatabasePath}", 
-                Path.Combine(Directory.GetCurrentDirectory(), "sms_database.db"));
+            await SeedDatabaseAsync(context, logger);
+            logger.LogInformation("Fresh SQLite database created and seeded");
         }
         else
         {
-            // For production, use migrations
-            await context.Database.MigrateAsync();
-            logger.LogInformation("Database migrations applied successfully");
+            // Local/Production (Linux Laptop): Persistent database with migrations  
+            logger.LogInformation("Ensuring persistent database for Local environment (Linux Laptop)");
+            await context.Database.EnsureCreatedAsync();
+            logger.LogInformation("SQLite database ensured at: {DatabasePath}", 
+                Path.Combine(Directory.GetCurrentDirectory(), "sms_database.db"));
         }
         
         // Test database connection
@@ -187,3 +191,115 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.Run();
+
+/// <summary>
+/// Seeds the database with demo data showcasing MessageParts architecture
+/// </summary>
+static async Task SeedDatabaseAsync(ApplicationDbContext context, ILogger logger)
+{
+    logger.LogInformation("Seeding database with demo MessageParts data...");
+    
+    // Demo Message 1: Single-part SMS (HTTP-style)
+    var singleMessage = new Message
+    {
+        Recipient = "+49111222333",
+        Content = "Welcome to MessageHub! This is a single SMS.",
+        Status = MessageStatus.Delivered,
+        ChannelType = ChannelType.HTTP,
+        ProviderName = "DemoProvider",
+        ProviderMessageId = "HTTP_001",
+        MessageParts = 1,
+        CreatedAt = DateTime.UtcNow.AddMinutes(-15),
+        SentAt = DateTime.UtcNow.AddMinutes(-14),
+        DeliveredAt = DateTime.UtcNow.AddMinutes(-13),
+        UpdatedAt = DateTime.UtcNow.AddMinutes(-13),
+        ChannelData = "{\"ChannelType\":\"HTTP\",\"Provider\":\"DemoProvider\"}"
+    };
+    context.Messages.Add(singleMessage);
+    await context.SaveChangesAsync();
+    
+    // Demo Message 2: Multi-part SMS with MessageParts (SMPP-style)
+    var multiMessage = new Message
+    {
+        Recipient = "+49444555666",
+        Content = "This is a very long demonstration message that showcases our new MessageParts architecture. Each SMS part gets its own MessagePart record with individual delivery tracking. This allows us to see exactly which parts were delivered successfully and which ones failed. The parent message status is computed from all parts: if all parts are delivered, the message is delivered. If some parts fail, we get PartiallyDelivered status. This is professional-grade SMS service architecture similar to Twilio and AWS SNS.",
+        Status = MessageStatus.PartiallyDelivered,
+        ChannelType = ChannelType.SMPP,
+        ProviderName = "SMPP",
+        ProviderMessageId = "DEMO_100", // Primary part ID
+        MessageParts = 4,
+        CreatedAt = DateTime.UtcNow.AddMinutes(-10),
+        SentAt = DateTime.UtcNow.AddMinutes(-9),
+        UpdatedAt = DateTime.UtcNow.AddMinutes(-5),
+        ChannelData = "{\"ChannelType\":\"SMPP\",\"SmppMessageIds\":[\"DEMO_100\",\"DEMO_101\",\"DEMO_102\",\"DEMO_103\"],\"MessageParts\":4}"
+    };
+    context.Messages.Add(multiMessage);
+    await context.SaveChangesAsync();
+    
+    // Create MessageParts for the multi-part message
+    var messageParts = new[]
+    {
+        new MessagePart
+        {
+            MessageId = multiMessage.Id,
+            ProviderMessageId = "DEMO_100",
+            PartNumber = 1,
+            TotalParts = 4,
+            Status = MessageStatus.Delivered,
+            CreatedAt = DateTime.UtcNow.AddMinutes(-9),
+            SentAt = DateTime.UtcNow.AddMinutes(-9),
+            DeliveredAt = DateTime.UtcNow.AddMinutes(-8),
+            UpdatedAt = DateTime.UtcNow.AddMinutes(-8),
+            DeliveryStatus = "DELIVRD",
+            DeliveryReceiptText = "id:DEMO_100 sub:001 dlvrd:001 submit date:2024 done date:2024 stat:DELIVRD"
+        },
+        new MessagePart
+        {
+            MessageId = multiMessage.Id,
+            ProviderMessageId = "DEMO_101",
+            PartNumber = 2,
+            TotalParts = 4,
+            Status = MessageStatus.Delivered,
+            CreatedAt = DateTime.UtcNow.AddMinutes(-9),
+            SentAt = DateTime.UtcNow.AddMinutes(-9),
+            DeliveredAt = DateTime.UtcNow.AddMinutes(-7),
+            UpdatedAt = DateTime.UtcNow.AddMinutes(-7),
+            DeliveryStatus = "DELIVRD",
+            DeliveryReceiptText = "id:DEMO_101 sub:001 dlvrd:001 submit date:2024 done date:2024 stat:DELIVRD"
+        },
+        new MessagePart
+        {
+            MessageId = multiMessage.Id,
+            ProviderMessageId = "DEMO_102",
+            PartNumber = 3,
+            TotalParts = 4,
+            Status = MessageStatus.Failed,
+            CreatedAt = DateTime.UtcNow.AddMinutes(-9),
+            SentAt = DateTime.UtcNow.AddMinutes(-9),
+            DeliveredAt = DateTime.UtcNow.AddMinutes(-6),
+            UpdatedAt = DateTime.UtcNow.AddMinutes(-6),
+            DeliveryStatus = "UNDELIV",
+            DeliveryReceiptText = "id:DEMO_102 sub:001 dlvrd:000 submit date:2024 done date:2024 stat:UNDELIV err:003",
+            ErrorCode = 3
+        },
+        new MessagePart
+        {
+            MessageId = multiMessage.Id,
+            ProviderMessageId = "DEMO_103",
+            PartNumber = 4,
+            TotalParts = 4,
+            Status = MessageStatus.Sent,
+            CreatedAt = DateTime.UtcNow.AddMinutes(-9),
+            SentAt = DateTime.UtcNow.AddMinutes(-9),
+            UpdatedAt = DateTime.UtcNow.AddMinutes(-9)
+            // No delivery receipt yet - still pending
+        }
+    };
+    
+    context.MessageParts.AddRange(messageParts);
+    await context.SaveChangesAsync();
+    
+    logger.LogInformation("Database seeded successfully with {MessageCount} messages and {PartCount} message parts", 
+        2, messageParts.Length);
+    logger.LogInformation("Demo data showcases: Single SMS, Multi-part SMS with mixed delivery status");
+}

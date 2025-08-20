@@ -98,8 +98,8 @@ public class MessageService
 
                 if (result.Success && !string.IsNullOrEmpty(result.ProviderMessageId))
                 {
-                    _logger.LogInformation("Message sent successfully for message ID: {MessageId}, Provider ID: {ProviderMessageId}, Channel: {ChannelType}", 
-                        messageId, result.ProviderMessageId, message.ChannelType);
+                    _logger.LogInformation("Message sent successfully for message ID: {MessageId}, Provider ID: {ProviderMessageId}, Channel: {ChannelType}, Parts: {MessageParts}", 
+                        messageId, result.ProviderMessageId, message.ChannelType, result.MessageParts);
                     
                     message.SentAt = DateTime.UtcNow;
                     message.ProviderMessageId = result.ProviderMessageId;
@@ -110,6 +110,12 @@ public class MessageService
                     if (result.ChannelData != null && result.ChannelData.Any())
                     {
                         message.ChannelData = System.Text.Json.JsonSerializer.Serialize(result.ChannelData);
+                    }
+                    
+                    // Create MessagePart records for SMPP multi-part messages
+                    if (message.ChannelType == ChannelType.SMPP && result.MessageParts > 1 && result.ProviderMessageIds.Any())
+                    {
+                        await CreateMessagePartsAsync(message, result.ProviderMessageIds);
                     }
                     
                     await UpdateMessageStatusAsync(message, MessageStatus.Sent);
@@ -144,6 +150,40 @@ public class MessageService
             _logger.LogInformation("Message send process completed for message ID: {MessageId} in {Duration}ms", 
                 messageId, duration.TotalMilliseconds);
         }
+    }
+
+    /// <summary>
+    /// Creates MessagePart records for SMPP multi-part messages
+    /// </summary>
+    private async Task CreateMessagePartsAsync(Message message, List<string> providerMessageIds)
+    {
+        _logger.LogInformation("Creating {PartCount} MessagePart records for message ID {MessageId}", 
+            providerMessageIds.Count, message.Id);
+
+        var messageParts = new List<MessagePart>();
+        
+        for (int i = 0; i < providerMessageIds.Count; i++)
+        {
+            var messagePart = new MessagePart
+            {
+                MessageId = message.Id,
+                ProviderMessageId = providerMessageIds[i],
+                PartNumber = i + 1,
+                TotalParts = providerMessageIds.Count,
+                Status = MessageStatus.Sent, // Parts inherit status from parent message
+                SentAt = message.SentAt,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            
+            messageParts.Add(messagePart);
+        }
+
+        _dbContext.MessageParts.AddRange(messageParts);
+        await _dbContext.SaveChangesAsync();
+
+        _logger.LogInformation("Created {PartCount} MessagePart records for message ID {MessageId}: IDs [{ProviderIds}]", 
+            messageParts.Count, message.Id, string.Join(", ", providerMessageIds));
     }
 
     /// <summary>
@@ -182,7 +222,7 @@ public class MessageService
     }
 
     /// <summary>
-    /// Processes delivery receipt from SMPP channel
+    /// Processes delivery receipt from SMPP channel with enhanced multi-part support
     /// </summary>
     public async Task ProcessDeliveryReceiptAsync(SmppDeliveryReceipt receipt)
     {
@@ -190,23 +230,54 @@ public class MessageService
         {
             _logger.LogInformation("Processing delivery receipt for SMPP message ID: {SmppMessageId}", receipt.SmppMessageId);
 
-            // Find the message by provider message ID
+            // Try to find MessagePart first (for SMPP multi-part messages)
+            var messagePart = await _dbContext.MessageParts
+                .Include(mp => mp.Message)
+                .FirstOrDefaultAsync(mp => mp.ProviderMessageId == receipt.SmppMessageId);
+                
+            if (messagePart != null)
+            {
+                // This is a multi-part SMS delivery receipt
+                _logger.LogInformation("Found MessagePart for SMPP message ID {SmppMessageId}: MessageID={MessageId}, Part={PartNumber}/{TotalParts}", 
+                    receipt.SmppMessageId, messagePart.MessageId, messagePart.PartNumber, messagePart.TotalParts);
+
+                // Update individual SMS part status
+                var partStatus = MapDeliveryStatusToMessageStatus(receipt.DeliveryStatus);
+                messagePart.Status = partStatus;
+                messagePart.DeliveredAt = receipt.ReceivedAt;
+                messagePart.DeliveryReceiptText = receipt.ReceiptText;
+                messagePart.DeliveryStatus = receipt.DeliveryStatus;
+                messagePart.ErrorCode = receipt.ErrorCode;
+                messagePart.UpdatedAt = DateTime.UtcNow;
+
+                // Update parent message's overall status based on all parts
+                var parentMessage = messagePart.Message;
+                await UpdateParentMessageFromParts(parentMessage);
+
+                _logger.LogInformation("Successfully processed multi-part delivery receipt: MessagePart {PartNumber}/{TotalParts} -> {PartStatus}, Overall Message Status -> {OverallStatus}", 
+                    messagePart.PartNumber, messagePart.TotalParts, partStatus, parentMessage.OverallStatus);
+                
+                await _dbContext.SaveChangesAsync();
+                return;
+            }
+
+            // Fallback: Single-part message or direct message lookup
             var message = await _dbContext.Messages
                 .FirstOrDefaultAsync(s => s.ProviderMessageId == receipt.SmppMessageId);
 
             if (message == null)
             {
-                _logger.LogWarning("Message not found for SMPP message ID: {SmppMessageId}", receipt.SmppMessageId);
+                _logger.LogWarning("Message not found for SMPP message ID: {SmppMessageId} (checked both MessageParts and Messages tables)", receipt.SmppMessageId);
                 return;
             }
 
-            _logger.LogInformation("Found message ID {MessageId} for SMPP message ID {SmppMessageId}", 
+            _logger.LogInformation("Found single-part message ID {MessageId} for SMPP message ID {SmppMessageId}", 
                 message.Id, receipt.SmppMessageId);
 
             // Map delivery status to MessageStatus
             var newStatus = MapDeliveryStatusToMessageStatus(receipt.DeliveryStatus);
             
-            _logger.LogInformation("Updating message ID {MessageId}: {OldStatus} -> {NewStatus} (SMPP: {SmppStatus})",
+            _logger.LogInformation("Updating single-part message ID {MessageId}: {OldStatus} -> {NewStatus} (SMPP: {SmppStatus})",
                 message.Id, message.Status, newStatus, receipt.DeliveryStatus);
 
             // Update the message with delivery receipt information
@@ -221,13 +292,41 @@ public class MessageService
             _dbContext.Messages.Update(message);
             await _dbContext.SaveChangesAsync();
 
-            _logger.LogInformation("Successfully processed delivery receipt for message ID {MessageId}: Status={Status}", 
+            _logger.LogInformation("Successfully processed single-part delivery receipt for message ID {MessageId}: Status={Status}", 
                 message.Id, message.Status);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing delivery receipt for SMPP message ID: {SmppMessageId}", receipt.SmppMessageId);
         }
+    }
+
+    /// <summary>
+    /// Updates parent message status based on all its MessageParts
+    /// </summary>
+    private async Task UpdateParentMessageFromParts(Message parentMessage)
+    {
+        // Load all parts if not already loaded
+        if (!parentMessage.Parts.Any())
+        {
+            await _dbContext.Entry(parentMessage)
+                .Collection(m => m.Parts)
+                .LoadAsync();
+        }
+
+        // Compute overall status using the Message.OverallStatus property
+        var previousStatus = parentMessage.Status;
+        parentMessage.Status = parentMessage.OverallStatus;
+        parentMessage.UpdatedAt = DateTime.UtcNow;
+
+        // Update delivery timestamp if all parts are delivered
+        if (parentMessage.Status == MessageStatus.Delivered && !parentMessage.DeliveredAt.HasValue)
+        {
+            parentMessage.DeliveredAt = DateTime.UtcNow;
+        }
+
+        _logger.LogInformation("Updated parent message ID {MessageId} status: {PreviousStatus} -> {NewStatus} based on {PartCount} parts", 
+            parentMessage.Id, previousStatus, parentMessage.Status, parentMessage.Parts.Count);
     }
 
     /// <summary>

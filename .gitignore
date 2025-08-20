@@ -25,6 +25,11 @@ appsettings.*.json
 secrets.json
 user-secrets.json
 
+# SQLite databases (managed via fresh seed on startup)
+*.db
+*.db-shm
+*.db-wal
+
 # SMPP Simulator logs and config
 *.smpp.log
 smpp-sim.conf

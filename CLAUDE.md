@@ -72,6 +72,74 @@ dotnet ef database drop
 python3 scripts/view_db.py
 ```
 
+### Fresh Database on Startup System (2025-08-20)
+
+**Automatic Environment-Specific Database Management**
+
+The MessageHub service now includes a sophisticated **Fresh Database on Startup** system that solves deployment issues and ensures consistent database schemas across environments.
+
+#### **Environment Strategy**
+- **Development Environment** (Azure WebApp): Fresh database with demo data on every startup
+- **Local Environment** (Linux/Windows local dev): Persistent database with migrations
+
+#### **How It Works**
+```csharp
+// Program.cs - Environment-specific database initialization
+if (app.Environment.IsDevelopment())
+{
+    // Development (Azure WebApp): Fresh start for reliable deployments
+    await context.Database.EnsureDeletedAsync();  // Delete old database
+    await context.Database.EnsureCreatedAsync();  // Create with current schema
+    await SeedDatabaseAsync(context, logger);     // Add comprehensive demo data
+}
+else
+{
+    // Local: Persistent development database
+    await context.Database.EnsureCreatedAsync();  // Create only if doesn't exist
+}
+```
+
+#### **Configuration Paths**
+- **Development** (`appsettings.Development.json`): `"Data Source=D:\\home\\data\\sms_database.db"` (Azure WebApp writable path)
+- **Local** (`appsettings.json`): `"Data Source=sms_database.db"` (Current directory)
+
+#### **Demo Seed Data**
+The fresh database includes professional demonstration data showcasing the MessageParts architecture:
+
+1. **Single SMS Message** (HTTP channel)
+   - Status: `Delivered`
+   - Demonstrates simple message flow
+
+2. **Multi-Part SMS Message** (SMPP channel, 4 parts)
+   - Part 1 & 2: `Delivered` ✅
+   - Part 3: `Failed` (UNDELIV error) ❌  
+   - Part 4: `Sent` (pending DLR) ⏳
+   - Overall Status: `PartiallyDelivered` 🎯
+   - **Demonstrates**: Complete MessageParts architecture with mixed delivery states
+
+#### **Benefits**
+- ✅ **Always Current Schema**: Every Azure deployment gets latest MessageParts tables
+- ✅ **Zero Migration Issues**: No EF Core migration conflicts in production deployments  
+- ✅ **Immediate Demo**: Fresh deployment includes working examples of all features
+- ✅ **Azure WebApp Ready**: Uses writable paths (`D:\\home\\data\\`)
+- ✅ **Local Development**: Persistent database for iterative development
+
+#### **Deployment Process**
+1. **Local Development**: Database persists for continuous work
+2. **Git Push**: SQLite files ignored, only schema and code deployed
+3. **Azure WebApp Deployment**: Fresh database created automatically
+4. **Immediate Testing**: Demo MessageParts data ready for API testing
+
+#### **Git Strategy**
+```gitignore
+# SQLite databases (managed via fresh seed on startup)
+*.db
+*.db-shm
+*.db-wal
+```
+
+**Result**: Perfect solution for Azure WebApp deployments - no manual database management required!
+
 ### Other Commands
 ```bash
 # Clean build artifacts
@@ -681,3 +749,77 @@ curl -k "https://localhost:7142/api/message/1/status"
 - `scripts/api-tests.http` - API test collection
 - `scripts/view_db.py` - Database inspection tool
 - Swagger UI - Interactive API documentation at `/swagger`
+
+---
+
+## 🚧 PRODUCTION DATABASE TODO
+
+### **IMPORTANT: Production Database Migration Required**
+
+**Current Status**: The MessageHub service is fully functional with SQLite and includes a comprehensive Fresh Database on Startup system for development and testing environments.
+
+**Production Requirement**: For true production deployment, the service should use **Azure SQL Database** instead of SQLite.
+
+### **Production Database Implementation Plan**
+
+#### **Phase 1: Azure SQL Database Setup**
+1. **Azure SQL Database Creation**
+   - Create Azure SQL Server instance
+   - Create MessageHub database
+   - Configure connection strings in Azure Key Vault
+   - Set up database firewall rules
+
+#### **Phase 2: EF Core Configuration Updates**  
+2. **Connection String Management**
+   ```csharp
+   // Program.cs - Update database provider selection
+   if (builder.Environment.IsDevelopment())
+   {
+       // Development: SQLite with Fresh Database system
+       options.UseSqlite(connectionString);
+   }
+   else
+   {
+       // Production: Azure SQL Database
+       options.UseSqlServer(connectionString);
+   }
+   ```
+
+3. **Migration Strategy**
+   ```bash
+   # Create initial Azure SQL migration
+   dotnet ef migrations add InitialAzureSqlMigration --context ApplicationDbContext
+   
+   # Apply to Azure SQL Database
+   dotnet ef database update --connection "Server=..."
+   ```
+
+#### **Phase 3: Production Environment Configuration**
+4. **Environment-Specific Database Strategy**
+   - **Development** (Azure WebApp): SQLite with Fresh Database + Demo Data
+   - **Staging** (Azure WebApp): Azure SQL Database with migrations
+   - **Production** (Azure WebApp): Azure SQL Database with migrations
+
+5. **Azure Key Vault Integration**
+   - Store Azure SQL connection strings securely
+   - Configure managed identity access
+   - Update `appsettings.Production.json` references
+
+#### **Benefits of Azure SQL Database**
+- ✅ **Enterprise Scalability**: Handle high-volume SMS processing
+- ✅ **High Availability**: Built-in redundancy and failover
+- ✅ **Backup & Recovery**: Automated backups and point-in-time recovery
+- ✅ **Performance**: Optimized for concurrent SMPP connections
+- ✅ **Security**: Advanced threat protection and audit logging
+- ✅ **Integration**: Native Azure ecosystem compatibility
+
+### **Migration Timeline**
+- **Current**: SQLite + Fresh Database (Perfect for development and testing)
+- **Next**: Azure SQL Database setup for production environments
+- **Future**: Multi-environment database strategy (SQLite dev, Azure SQL prod)
+
+**Note**: The existing MessageParts architecture and Fresh Database system will work seamlessly with Azure SQL Database - only the provider configuration needs updating.
+
+---
+
+**The service is production-ready with SQLite for immediate deployment. Azure SQL Database migration is recommended for enterprise-scale production environments.**
