@@ -92,10 +92,12 @@ public class MessageController : ControllerBase
             return BadRequest("PhoneNumber and Content are required");
         }
 
-        if (request.Content.Length > 1000)
+        // Allow longer messages - SMPP library will handle automatic splitting
+        // Reasonable limit for very long messages (SMS supports up to 255 parts * ~153 chars = ~39k chars)
+        if (request.Content.Length > 10000)
         {
             _logger.LogWarning("Message content too long: {Length} characters", request.Content.Length);
-            return BadRequest("Message content cannot exceed 1000 characters");
+            return BadRequest("Message content cannot exceed 10000 characters");
         }
 
         try

@@ -84,20 +84,8 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
                 }
             }
 
-            // Build message submit request
-            var sms = SMS.ForSubmit()
-                .From(message.From)
-                .To(message.PhoneNumber.TrimStart('+'))
-                .Text(message.Content);
-
-            // Request delivery receipt if configured
-            if (message.RequestDeliveryReceipt)
-            {
-                sms = sms.DeliveryReceipt();
-            }
-
-            _logger.LogDebug("Message submit prepared. From={From}, To={To}, ContentLength={ContentLength}", 
-                message.From, message.PhoneNumber, message.Content.Length);
+            _logger.LogDebug("Message submit prepared. From={From}, To={To}, ContentLength={ContentLength}, DeliveryReceipt={RequestDR}", 
+                message.From, message.PhoneNumber, message.Content.Length, message.RequestDeliveryReceipt);
 
             // Submit with retry logic and timeout handling
             SubmitSmResp[]? submitResponses = null;
@@ -130,7 +118,19 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
                     // Submit with timeout
                     _logger.LogInformation("SMPP client status before submit attempt {Retry}: {Status}", retryCount + 1, connection.Client.Status);
                     
-                    var submitTask = Task.Run(() => connection.Client.Submit(sms));
+                    var submitTask = Task.Run(() => {
+                        var smsBuilder = SMS.ForSubmit()
+                            .From(message.From)
+                            .To(message.PhoneNumber.TrimStart('+'))
+                            .Text(message.Content);
+                        
+                        if (message.RequestDeliveryReceipt)
+                        {
+                            smsBuilder = smsBuilder.DeliveryReceipt();
+                        }
+                        
+                        return connection.Client.Submit(smsBuilder);
+                    });
                     var timeoutTask = Task.Delay(TimeSpan.FromSeconds(5)); // 5 second timeout
                     
                     var completedTask = await Task.WhenAny(submitTask, timeoutTask);
@@ -215,13 +215,24 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
                 return SmppSendResult.Failure($"SMPP submit failed with statuses: {errorStatuses}");
             }
 
-            var smppMessageId = submitResponses.First().MessageId;
-            _logger.LogInformation("Message submitted successfully via SMPP. Message ID: {SmppMessageId} for {PhoneNumber}", 
-                smppMessageId, message.PhoneNumber);
+            // Collect all message IDs from the responses (for multi-part SMS)
+            var smppMessageIds = submitResponses.Select(resp => resp.MessageId).ToList();
+            var primaryMessageId = smppMessageIds.First();
+            
+            _logger.LogInformation("Message submitted successfully via SMPP. Message parts: {MessageParts}, Primary ID: {SmppMessageId}, All IDs: [{AllIds}] for {PhoneNumber}", 
+                smppMessageIds.Count, primaryMessageId, string.Join(", ", smppMessageIds), message.PhoneNumber);
 
             _logger.LogDebug("SMPP client status after submit: {Status}", connection.Client.Status);
 
-            return SmppSendResult.Success(smppMessageId);
+            // Return appropriate result based on number of parts
+            if (smppMessageIds.Count == 1)
+            {
+                return SmppSendResult.Success(primaryMessageId);
+            }
+            else
+            {
+                return SmppSendResult.SuccessMultiPart(smppMessageIds);
+            }
         }
         catch (Exception ex)
         {
@@ -558,14 +569,23 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
         // Convert SmppSendResult to MessageResult
         if (smppResult.IsSuccess)
         {
-            return MessageResult.CreateSuccess(
-                smppResult.SmppMessageId ?? "",
-                new Dictionary<string, object>
-                {
-                    ["SmppMessageId"] = smppResult.SmppMessageId ?? "",
-                    ["ChannelType"] = "SMPP"
-                }
-            );
+            var channelData = new Dictionary<string, object>
+            {
+                ["SmppMessageId"] = smppResult.SmppMessageId ?? "",
+                ["SmppMessageIds"] = smppResult.SmppMessageIds,
+                ["MessageParts"] = smppResult.MessageParts,
+                ["ChannelType"] = "SMPP"
+            };
+
+            // Return appropriate result based on number of parts
+            if (smppResult.MessageParts == 1)
+            {
+                return MessageResult.CreateSuccess(smppResult.SmppMessageId ?? "", channelData);
+            }
+            else
+            {
+                return MessageResult.CreateSuccessMultiPart(smppResult.SmppMessageIds, channelData);
+            }
         }
         else
         {

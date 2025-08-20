@@ -48,10 +48,17 @@ public class MessageResult
 {
     public bool Success { get; set; }
     public string? ProviderMessageId { get; set; }
+    public List<string> ProviderMessageIds { get; set; } = new(); // For multi-part SMS
+    public int MessageParts { get; set; } = 1; // Number of SMS parts
     public string? ErrorMessage { get; set; }
     public int? ErrorCode { get; set; }
     public int? NetworkErrorCode { get; set; }
     public Dictionary<string, object>? ChannelData { get; set; } = new();
+    
+    /// <summary>
+    /// Primary message ID - returns first ID from the list or single ProviderMessageId
+    /// </summary>
+    public string PrimaryMessageId => ProviderMessageIds.FirstOrDefault() ?? ProviderMessageId ?? "";
 
     public static MessageResult CreateSuccess(string providerMessageId, Dictionary<string, object>? channelData = null)
     {
@@ -59,6 +66,20 @@ public class MessageResult
         {
             Success = true,
             ProviderMessageId = providerMessageId,
+            ProviderMessageIds = new List<string> { providerMessageId },
+            MessageParts = 1,
+            ChannelData = channelData ?? new()
+        };
+    }
+    
+    public static MessageResult CreateSuccessMultiPart(List<string> providerMessageIds, Dictionary<string, object>? channelData = null)
+    {
+        return new MessageResult
+        {
+            Success = true,
+            ProviderMessageId = providerMessageIds.FirstOrDefault(), // Backward compatibility
+            ProviderMessageIds = providerMessageIds,
+            MessageParts = providerMessageIds.Count,
             ChannelData = channelData ?? new()
         };
     }
@@ -113,6 +134,7 @@ public class Message
     
     // Universal Delivery Receipt fields (used by all channels)
     public string? ProviderMessageId { get; set; }    // Provider message ID (SMPP message ID, HTTP API response ID, etc.)
+    public int? MessageParts { get; set; }            // Number of SMS parts for multi-part messages
     public DateTime? DeliveredAt { get; set; }        // When delivery receipt was received
     public string? DeliveryReceiptText { get; set; }  // Raw delivery receipt text (SMPP DLR or HTTP webhook payload)
     public string? DeliveryStatus { get; set; }       // Provider delivery status (DELIVRD, delivered, failed, etc.)

@@ -18,15 +18,35 @@ public class SmppSendResult
 {
     public bool IsSuccess { get; set; }
     public string? SmppMessageId { get; set; }
+    public List<string> SmppMessageIds { get; set; } = new(); // For multi-part SMS
+    public int MessageParts { get; set; } = 1; // Number of SMS parts
     public string? ErrorMessage { get; set; }
     public Exception? Exception { get; set; }
+    
+    /// <summary>
+    /// Primary message ID - returns first ID from the list or single SmppMessageId
+    /// </summary>
+    public string PrimaryMessageId => SmppMessageIds.FirstOrDefault() ?? SmppMessageId ?? "";
 
     public static SmppSendResult Success(string smppMessageId)
     {
         return new SmppSendResult
         {
             IsSuccess = true,
-            SmppMessageId = smppMessageId
+            SmppMessageId = smppMessageId,
+            SmppMessageIds = new List<string> { smppMessageId },
+            MessageParts = 1
+        };
+    }
+    
+    public static SmppSendResult SuccessMultiPart(List<string> smppMessageIds)
+    {
+        return new SmppSendResult
+        {
+            IsSuccess = true,
+            SmppMessageId = smppMessageIds.FirstOrDefault(), // Backward compatibility
+            SmppMessageIds = smppMessageIds,
+            MessageParts = smppMessageIds.Count
         };
     }
 

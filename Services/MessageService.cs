@@ -103,6 +103,7 @@ public class MessageService
                     
                     message.SentAt = DateTime.UtcNow;
                     message.ProviderMessageId = result.ProviderMessageId;
+                    message.MessageParts = result.MessageParts;
                     message.ProviderName = channel.ProviderName;
                     
                     // Store channel-specific data if available
