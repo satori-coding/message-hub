@@ -29,15 +29,22 @@ builder.Services.AddSwaggerGen();
 // Add Application Insights
 builder.Services.AddApplicationInsightsTelemetry();
 
-// Add Entity Framework with SQLite for local development
+// Add Entity Framework with environment-specific database providers
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
     if (builder.Environment.IsDevelopment())
     {
+        // Development: SQLite for local development
         options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection"));
+    }
+    else if (builder.Environment.EnvironmentName == "Test")
+    {
+        // Test: Azure SQL Database for WebApp hosting
+        options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
     }
     else
     {
+        // Production: Azure SQL Database
         options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
     }
 });
