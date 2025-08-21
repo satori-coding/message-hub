@@ -112,7 +112,7 @@ public class MessageController : ControllerBase
                 PhoneNumber = message.Recipient,
                 Status = GetDisplayStatus(message), // Enhanced status display
                 CreatedAt = message.CreatedAt,
-                Message = "Nachricht wurde erfolgreich zur Verarbeitung angenommen"
+                Message = GetStatusMessage(message.Status)
             };
 
             _logger.LogInformation("Message request processed successfully with ID: {MessageId}", message.Id);
@@ -122,7 +122,7 @@ public class MessageController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing message send request");
-            return StatusCode(500, "Fehler beim Verarbeiten der Nachrichten-Anfrage");
+            return StatusCode(500, "Error processing message request");
         }
     }
 
@@ -135,6 +135,25 @@ public class MessageController : ControllerBase
             MessageStatus.DeliveryUnknown => "Delivery Unknown (DLR timeout)",
             MessageStatus.Delivered => "Delivered (confirmed)",
             _ => message.Status.ToString()
+        };
+    }
+
+    private string GetStatusMessage(MessageStatus status)
+    {
+        return status switch
+        {
+            MessageStatus.Pending => "Message is being processed",
+            MessageStatus.Sent => "Message sent successfully, awaiting delivery confirmation",
+            MessageStatus.Failed => "Message delivery failed",
+            MessageStatus.Delivered => "Message delivered successfully",
+            MessageStatus.AssumedDelivered => "Message sent successfully, delivery assumed (no receipt received)",
+            MessageStatus.DeliveryUnknown => "Message sent but delivery status unknown",
+            MessageStatus.Expired => "Message expired before delivery",
+            MessageStatus.Rejected => "Message rejected by network or recipient",
+            MessageStatus.Undelivered => "Message could not be delivered",
+            MessageStatus.Unknown => "Message status unknown",
+            MessageStatus.Accepted => "Message accepted by provider",
+            _ => "Message processed"
         };
     }
 }
