@@ -27,30 +27,51 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
     public ChannelType ChannelType => ChannelType.SMPP;
     public string ProviderName => "SMPP";
 
+    /// <summary>
+    /// Constructor: Sets up the SMPP channel with connection pooling and keep-alive mechanism
+    /// 1. Validates configuration (host, credentials, timeouts)
+    /// 2. Initializes connection pool data structures
+    /// 3. Sets up semaphore to limit concurrent connections (e.g., max 3 connections)
+    /// 4. Starts background timer for keep-alive (enquire_link every 30 seconds)
+    /// </summary>
     public SmppChannel(SmppChannelConfiguration configuration, ILogger<SmppChannel> logger)
     {
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         
-        // Validate configuration
+        // 1. Validate that required settings are provided (host, credentials, etc.)
         _configuration.Validate();
 
-        _availableConnections = new ConcurrentQueue<SmppConnection>();
-        _allConnections = new ConcurrentDictionary<int, SmppConnection>();
-        _connectionSemaphore = new SemaphoreSlim(_configuration.MaxConnections, _configuration.MaxConnections);
+        // 2. Initialize connection pool structures:
+        _availableConnections = new ConcurrentQueue<SmppConnection>();  // Pool of ready-to-use connections
+        _allConnections = new ConcurrentDictionary<int, SmppConnection>(); // Track all connections for cleanup
+        _connectionSemaphore = new SemaphoreSlim(_configuration.MaxConnections, _configuration.MaxConnections); // Limit concurrent connections
 
-        // Start keep-alive timer
+        // 3. Start background keep-alive timer (sends enquire_link to all connections periodically)
         _keepAliveTimer = new Timer(SendKeepAlive, null, _configuration.KeepAliveInterval, _configuration.KeepAliveInterval);
 
         _logger.LogInformation("SMPP Channel initialized with max {MaxConnections} connections to {Host}:{Port}", 
             _configuration.MaxConnections, _configuration.Host, _configuration.Port);
     }
 
+    /// <summary>
+    /// Main SMS sending method through SMPP protocol
+    /// FLOW:
+    /// 1. Validate input (phone number and content required)
+    /// 2. Get connection from pool (reuse existing or create new)
+    /// 3. Validate connection health (test with enquire_link)
+    /// 4. Submit SMS with retry logic and timeout handling
+    /// 5. Process response and extract provider message IDs
+    /// 6. Return connection to pool for reuse
+    /// 
+    /// The SMPP server endpoint is configured in SmppChannelConfiguration.Host:Port
+    /// </summary>
     public async Task<SmppSendResult> SendSmsAsync(SmppMessage message)
     {
         if (_disposed)
             throw new ObjectDisposedException(nameof(SmppChannel));
 
+        // 1. Input validation - both phone number and message content are required
         if (string.IsNullOrWhiteSpace(message.PhoneNumber) || string.IsNullOrWhiteSpace(message.Content))
         {
             return SmppSendResult.Failure("Phone number and content are required");
@@ -62,22 +83,24 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
         
         try
         {
-            // Get connection from pool with enhanced validation
+            // 2. Get connection from pool (reuses existing healthy connections or creates new ones)
+            //    This calls GetConnectionAsync() which handles connection pooling logic
             connection = await GetConnectionAsync();
             _logger.LogDebug("SMPP connection retrieved from pool. IsHealthy={IsHealthy}, Status={Status}", 
                 connection.IsHealthy, connection.Client.Status);
 
-            // Additional connection validation before sending
+            // 3. Double-check connection health before using (connection could have gone stale)
+            //    ConnectionStatus.Bound means we're authenticated and ready to send
             if (!connection.IsHealthy || connection.Client.Status != ConnectionStatus.Bound)
             {
                 _logger.LogWarning("SMPP connection unhealthy, requesting fresh connection. Status={Status}", 
                     connection.Client.Status);
                 
-                // Return bad connection and get a new one
+                // Return bad connection to pool (it will be disposed) and get a fresh one
                 ReturnConnection(connection);
                 connection = await GetConnectionAsync();
                 
-                // If still bad, throw exception
+                // If we still can't get a healthy connection, fail the request
                 if (!connection.IsHealthy || connection.Client.Status != ConnectionStatus.Bound)
                 {
                     return SmppSendResult.Failure($"Unable to get healthy SMPP connection. Status={connection.Client.Status}");
@@ -87,7 +110,9 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
             _logger.LogDebug("Message submit prepared. From={From}, To={To}, ContentLength={ContentLength}, DeliveryReceipt={RequestDR}", 
                 message.From, message.PhoneNumber, message.Content.Length, message.RequestDeliveryReceipt);
 
-            // Submit with retry logic and timeout handling
+            // 4. Submit SMS with comprehensive retry logic and timeout handling
+            //    The SMPP protocol uses submit_sm PDUs (Protocol Data Units) to send messages
+            //    We retry up to 2 times with fresh connections if needed
             SubmitSmResp[]? submitResponses = null;
             int retryCount = 0;
             const int maxRetries = 2;
@@ -115,23 +140,26 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
                         }
                     }
 
-                    // Submit with timeout
+                    // Submit SMS message to SMPP server with timeout protection
                     _logger.LogInformation("SMPP client status before submit attempt {Retry}: {Status}", retryCount + 1, connection.Client.Status);
                     
+                    // Build the submit_sm PDU with message details and optional delivery receipt request
                     var submitTask = Task.Run(() => {
                         var smsBuilder = SMS.ForSubmit()
-                            .From(message.From)
-                            .To(message.PhoneNumber.TrimStart('+'))
-                            .Text(message.Content);
+                            .From(message.From)                                    // Sender ID
+                            .To(message.PhoneNumber.TrimStart('+'))               // Remove + prefix for SMPP
+                            .Text(message.Content);                               // Message content
                         
+                        // Request delivery receipt (DLR) if configured
                         if (message.RequestDeliveryReceipt)
                         {
                             smsBuilder = smsBuilder.DeliveryReceipt();
                         }
                         
+                        // Actually submit to SMPP server - this is where the external SMPP endpoint is called
                         return connection.Client.Submit(smsBuilder);
                     });
-                    var timeoutTask = Task.Delay(_configuration.SubmitTimeout); // Configurable submit timeout
+                    var timeoutTask = Task.Delay(_configuration.SubmitTimeout); // Configurable submit timeout (default 10s)
                     
                     var completedTask = await Task.WhenAny(submitTask, timeoutTask);
                     
@@ -192,7 +220,8 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
                 }
             }
             
-            // Validate responses
+            // 5. Process SMPP server responses (submit_sm_resp PDUs)
+            //    Each response contains status and unique message ID from the provider
             if (submitResponses == null)
             {
                 return SmppSendResult.Failure("Submit failed - no responses received");
@@ -200,14 +229,15 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
 
             _logger.LogDebug("SubmitSm responses received. Count={Count}", submitResponses.Length);
             
-            // Log each response status
+            // Log each response with provider-assigned message IDs
             foreach (var resp in submitResponses)
             {
                 _logger.LogInformation("SubmitSmResp: Status={Status}, Sequence={Sequence}, MessageId={MessageId}", 
                     resp.Header.Status, resp.Header.Sequence, resp.MessageId);
             }
 
-            // Check for successful submission
+            // Verify all parts were accepted by SMPP server
+            // CommandStatus.ESME_ROK means "No Error" in SMPP protocol
             if (!submitResponses.All(x => x.Header.Status == CommandStatus.ESME_ROK))
             {
                 var failedResponses = submitResponses.Where(x => x.Header.Status != CommandStatus.ESME_ROK);
@@ -216,7 +246,8 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
                 return SmppSendResult.Failure($"SMPP submit failed with statuses: {errorStatuses}");
             }
 
-            // Collect all message IDs from the responses (for multi-part SMS)
+            // 6. Collect provider message IDs (used later for delivery receipt correlation)
+            //    Long messages are split into multiple parts, each gets its own ID
             var smppMessageIds = submitResponses.Select(resp => resp.MessageId).ToList();
             var primaryMessageId = smppMessageIds.First();
             
@@ -242,7 +273,8 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
         }
         finally
         {
-            // Always return connection to pool
+            // 7. Always return connection to pool for reuse (crucial for performance)
+            //    Healthy connections are queued for reuse, unhealthy ones are disposed
             if (connection != null)
             {
                 ReturnConnection(connection);
@@ -268,41 +300,54 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Connection pool management - gets a ready-to-use SMPP connection
+    /// FLOW:
+    /// 1. Wait for available connection slot (semaphore limits concurrent connections)
+    /// 2. Try to reuse existing healthy connection from pool
+    /// 3. Validate connection health with enquire_link test
+    /// 4. If no healthy connection available, create new one
+    /// 5. Mark connection as "in use" and return it
+    /// </summary>
     private async Task<SmppConnection> GetConnectionAsync()
     {
         if (_disposed)
             throw new ObjectDisposedException(nameof(SmppChannel));
 
+        // 1. Wait for available connection slot (e.g., max 3 concurrent connections)
         await _connectionSemaphore.WaitAsync();
 
         try
         {
-            // Try to get an available connection with enhanced health validation
+            // 2. Try to reuse an existing connection from the pool
             if (_availableConnections.TryDequeue(out var availableConnection))
             {
-                // Enhanced health check with EnquireLink test
+                // 3. Test connection health with enquire_link (SMPP heartbeat)
                 if (await ValidateConnectionHealthAsync(availableConnection))
                 {
-                    availableConnection.IsAvailable = false;
+                    availableConnection.IsAvailable = false;  // Mark as "in use"
                     availableConnection.LastUsed = DateTime.UtcNow;
                     _logger.LogDebug("Reusing existing healthy SMPP connection");
                     return availableConnection;
                 }
                 else
                 {
+                    // Connection is stale/broken, dispose it
                     _logger.LogWarning("Connection failed health validation, disposing");
                     _allConnections.TryRemove(availableConnection.GetHashCode(), out _);
                     availableConnection.Dispose();
                 }
             }
 
-            // Create new connection
+            // 4. No healthy connection available, create a new one
+            //    This will connect to the SMPP server endpoint specified in configuration
             _logger.LogInformation("Creating new SMPP connection to {Host}:{Port}", _configuration.Host, _configuration.Port);
             var connection = await CreateConnectionAsync();
             
             var connectionId = Interlocked.Increment(ref _connectionCounter);
             _allConnections.TryAdd(connectionId, connection);
             
+            // 5. Mark new connection as "in use"
             connection.IsAvailable = false;
             connection.LastUsed = DateTime.UtcNow;
 
@@ -316,28 +361,39 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Validates if an SMPP connection is still healthy and responsive
+    /// PROCESS:
+    /// 1. Check if connection is marked as healthy (Status == Bound)
+    /// 2. Send enquire_link PDU to test server responsiveness
+    /// 3. Wait max 5 seconds for enquire_link_resp
+    /// 4. Return true if server responds, false if timeout or error
+    /// </summary>
     private async Task<bool> ValidateConnectionHealthAsync(SmppConnection connection)
     {
         try
         {
+            // 1. Quick check - if connection isn't bound, it's definitely not healthy
             if (!connection.IsHealthy)
             {
                 _logger.LogDebug("Connection marked as unhealthy");
                 return false;
             }
 
-            // Test connection with EnquireLink with timeout
+            // 2. Send enquire_link PDU (SMPP heartbeat) to test if server is responsive
             var enquireLinkTask = Task.Run(() => connection.Client.EnquireLink());
             var timeoutTask = Task.Delay(TimeSpan.FromSeconds(5)); // Health check timeout
             
             var completedTask = await Task.WhenAny(enquireLinkTask, timeoutTask);
             
+            // 3. Check if enquire_link timed out (server not responding)
             if (completedTask == timeoutTask)
             {
                 _logger.LogDebug("Connection health validation timed out after 5s");
                 return false;
             }
             
+            // 4. Get result and check for exceptions
             await enquireLinkTask; // Get any potential exception
             _logger.LogDebug("Connection health validation successful");
             return true;
@@ -349,6 +405,14 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Returns a used connection back to the pool for reuse
+    /// PROCESS:
+    /// 1. Check if connection is still healthy
+    /// 2. If healthy: mark as available and add back to pool queue
+    /// 3. If unhealthy: dispose connection and remove from tracking
+    /// 4. Always release semaphore slot for new connections
+    /// </summary>
     private void ReturnConnection(SmppConnection connection)
     {
         if (_disposed || connection == null)
@@ -359,8 +423,10 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
 
         try
         {
+            // 1. Check if connection is still healthy for reuse
             if (connection.IsHealthy)
             {
+                // 2. Mark as available and return to pool for next SMS
                 connection.IsAvailable = true;
                 connection.LastUsed = DateTime.UtcNow;
                 _availableConnections.Enqueue(connection);
@@ -368,6 +434,7 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
             }
             else
             {
+                // 3. Connection is broken, dispose it
                 _logger.LogWarning("Disposing unhealthy returned SMPP connection");
                 _allConnections.TryRemove(connection.GetHashCode(), out _);
                 connection.Dispose();
@@ -379,10 +446,23 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
         }
         finally
         {
+            // 4. Always release semaphore slot so new connections can be created
             _connectionSemaphore.Release();
         }
     }
 
+    /// <summary>
+    /// Creates a new SMPP connection to the external SMS provider
+    /// PROCESS:
+    /// 1. Create SmppClient instance (from Inetlab.SMPP library)
+    /// 2. Connect to SMPP server with timeout (TCP connection)
+    /// 3. Authenticate with bind_transceiver (username/password)
+    /// 4. Register delivery receipt handler for incoming DLRs
+    /// 5. Return wrapped connection ready for SMS sending
+    /// 
+    /// This is where the actual connection to external SMPP server happens!
+    /// Server endpoint comes from _configuration.Host and _configuration.Port
+    /// </summary>
     private async Task<SmppConnection> CreateConnectionAsync()
     {
         var client = new SmppClient();
@@ -393,7 +473,8 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
             _logger.LogInformation("Starting SMPP connection to {Host}:{Port} (Connection timeout: {ConnectionTimeout}s, Bind timeout: {BindTimeout}s)", 
                 _configuration.Host, _configuration.Port, _configuration.ConnectionTimeout.TotalSeconds, _configuration.BindTimeout.TotalSeconds);
             
-            // Connect to SMPP server with timeout
+            // 1. Establish TCP connection to external SMPP server with timeout protection
+            //    _configuration.Host and _configuration.Port specify the SMS provider endpoint
             var connectTask = Task.Run(() => client.Connect(_configuration.Host, _configuration.Port));
             var timeoutTask = Task.Delay(_configuration.ConnectionTimeout);
             
@@ -419,11 +500,13 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
             _logger.LogInformation("Connected to SMPP server {Host}:{Port} in {Duration}ms", 
                 _configuration.Host, _configuration.Port, connectDuration.TotalMilliseconds);
 
-            // Register delivery receipt event handler BEFORE binding
+            // 2. Register handler for incoming delivery receipts BEFORE authentication
+            //    When SMS provider sends delivery status updates, they come through evDeliverSm event
             client.evDeliverSm += OnDeliveryReceiptHandler;
             _logger.LogDebug("Registered evDeliverSm event handler for DLR processing");
 
-            // Bind as transceiver (send and receive DLRs) with timeout
+            // 3. Authenticate with SMPP server using credentials (bind_transceiver PDU)
+            //    Transceiver mode allows both sending SMS and receiving delivery receipts
             var bindStart = DateTime.UtcNow;
             var bindTask = Task.Run(() => client.Bind(_configuration.SystemId, _configuration.Password, ConnectionMode.Transceiver));
             var bindTimeoutTask = Task.Delay(_configuration.BindTimeout);
@@ -469,11 +552,21 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Handles incoming delivery receipts from SMPP server
+    /// PROCESS:
+    /// 1. Check if incoming message is a delivery receipt (not a mobile-originated SMS)
+    /// 2. Extract message ID to correlate with originally sent SMS
+    /// 3. Parse delivery status (DELIVRD, UNDELIV, etc.) and error codes
+    /// 4. Fire event to notify MessageService about delivery status update
+    /// 
+    /// This is called when the external SMS provider sends delivery confirmations
+    /// </summary>
     private void OnDeliveryReceiptHandler(object sender, DeliverSm deliverSm)
     {
         try
         {
-            // Check if this is a delivery receipt using the library's MessageType
+            // 1. Check if this is a delivery receipt (vs. incoming SMS from mobile)
             if (deliverSm.MessageType == MessageTypes.SMSCDeliveryReceipt)
             {
                 _logger.LogInformation("Received delivery receipt from {SourceAddr}", deliverSm.SourceAddress.Address);
@@ -484,17 +577,18 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
 
                 if (!string.IsNullOrEmpty(smppMessageId))
                 {
+                    // 2. Create structured delivery receipt object
                     var receipt = new SmppDeliveryReceipt
                     {
-                        SmppMessageId = smppMessageId,
+                        SmppMessageId = smppMessageId,                           // Correlate with sent SMS
                         SourceAddress = sourceAddr,
-                        ReceiptText = receiptText,
+                        ReceiptText = receiptText,                               // Raw receipt text
                         ReceivedAt = DateTime.UtcNow,
-                        DeliveryStatus = ParseDeliveryStatus(receiptText),
-                        ErrorCode = ParseErrorCode(receiptText)
+                        DeliveryStatus = ParseDeliveryStatus(receiptText),       // DELIVRD, UNDELIV, etc.
+                        ErrorCode = ParseErrorCode(receiptText)                  // Error details if failed
                     };
 
-                    // Fire the event
+                    // 3. Fire event to notify MessageService about status update
                     OnDeliveryReceiptReceived?.Invoke(receipt);
                     
                     _logger.LogDebug("Delivery receipt processed successfully for SMPP message ID: {SmppMessageId}", smppMessageId);
@@ -546,6 +640,15 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Background timer method: sends keep-alive messages to all SMPP connections
+    /// PURPOSE:
+    /// 1. Prevents SMPP servers from closing idle connections
+    /// 2. Detects broken connections early (enquire_link will fail)
+    /// 3. Runs every 30 seconds by default
+    /// 
+    /// Uses enquire_link PDU (SMPP heartbeat mechanism)
+    /// </summary>
     private void SendKeepAlive(object? state)
     {
         if (_disposed) return;
@@ -561,7 +664,7 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
                 {
                     if (connection.IsHealthy)
                     {
-                        // Send enquire_link
+                        // Send enquire_link PDU to keep connection alive with SMPP server
                         Task.Run(() => connection.Client.EnquireLink());
                     }
                 }
@@ -608,7 +711,16 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
         await Task.CompletedTask;
     }
 
-    // IMessageChannel implementation
+    /// <summary>
+    /// Universal message channel interface implementation
+    /// FLOW:
+    /// 1. Convert generic Message to SMPP-specific SmppMessage format
+    /// 2. Apply overall API timeout (default 45s) to prevent infinite waits
+    /// 3. Call the main SendSmsAsync method
+    /// 4. Convert SMPP-specific result back to generic MessageResult
+    /// 
+    /// This is the entry point called by MessageService for SMPP channel
+    /// </summary>
     async Task<MessageResult> IMessageChannel.SendAsync(Message message)
     {
         var startTime = DateTime.UtcNow;
@@ -618,7 +730,7 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
             _logger.LogInformation("Starting SMPP send operation for {PhoneNumber} (API timeout: {ApiTimeout}s)", 
                 message.Recipient, _configuration.ApiTimeout.TotalSeconds);
             
-            // Convert Message to SmppMessage
+            // 1. Convert generic message to SMPP-specific format
             var smppMessage = new SmppMessage
             {
                 PhoneNumber = message.Recipient,
@@ -627,7 +739,7 @@ public class SmppChannel : ISmppChannel, IMessageChannel, IAsyncDisposable
                 RequestDeliveryReceipt = true
             };
 
-            // Call the existing SMPP implementation with overall API timeout
+            // 2. Execute SMS sending with overall timeout protection
             var sendTask = SendSmsAsync(smppMessage);
             var apiTimeoutTask = Task.Delay(_configuration.ApiTimeout);
             

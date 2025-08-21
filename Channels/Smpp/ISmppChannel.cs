@@ -13,14 +13,45 @@ public class SmppMessage
 
 /// <summary>
 /// Result of sending a message via SMPP channel
+/// OUTPUT: Contains success/failure status and provider message IDs for tracking
 /// </summary>
 public class SmppSendResult
 {
+    /// <summary>
+    /// Whether SMS was successfully submitted to SMPP server
+    /// True = server accepted the message
+    /// False = submission failed (network, auth, or protocol error)
+    /// </summary>
     public bool IsSuccess { get; set; }
+    
+    /// <summary>
+    /// Primary message ID assigned by SMPP provider
+    /// Used for delivery receipt correlation and tracking
+    /// </summary>
     public string? SmppMessageId { get; set; }
+    
+    /// <summary>
+    /// All message IDs for multi-part SMS (long messages split into multiple parts)
+    /// Each part gets its own ID from the SMPP provider
+    /// </summary>
     public List<string> SmppMessageIds { get; set; } = new(); // For multi-part SMS
+    
+    /// <summary>
+    /// Number of SMS parts (1 for normal SMS, >1 for long messages)
+    /// Useful for billing and delivery tracking
+    /// </summary>
     public int MessageParts { get; set; } = 1; // Number of SMS parts
+    
+    /// <summary>
+    /// Error description if IsSuccess = false
+    /// Contains human-readable error information
+    /// </summary>
     public string? ErrorMessage { get; set; }
+    
+    /// <summary>
+    /// Original exception if submission failed
+    /// For debugging and detailed error analysis
+    /// </summary>
     public Exception? Exception { get; set; }
     
     /// <summary>
