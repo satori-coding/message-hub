@@ -51,10 +51,10 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     }
 });
 
-// Add SMPP Channel services
+// Add SMPP Channel services (needed by TenantChannelManager)
 builder.Services.AddSmppChannel(builder.Configuration);
 
-// Add HTTP SMS Channel services (with default test configuration)
+// Add HTTP SMS Channel services (needed by TenantChannelManager)
 var httpSmsConfig = MessageHub.Channels.Http.HttpSmsProviderTemplates.Generic(
     "TestProvider",
     "https://api.test-sms-provider.com/send", 

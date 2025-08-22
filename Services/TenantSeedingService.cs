@@ -13,14 +13,6 @@ public static class TenantSeedingService
     /// </summary>
     public static async Task SeedTenantsFromConfigurationAsync(ApplicationDbContext context, IConfiguration configuration, ILogger logger)
     {
-        // Check if multi-tenant mode is enabled
-        var isMultiTenantEnabled = configuration.GetValue<bool>("MultiTenantSettings:EnableMultiTenant", false);
-        if (!isMultiTenantEnabled)
-        {
-            logger.LogInformation("Multi-tenant mode disabled, skipping tenant seeding");
-            return;
-        }
-
         // Check if tenants already exist
         var existingTenants = await context.Tenants.AnyAsync();
         if (existingTenants)

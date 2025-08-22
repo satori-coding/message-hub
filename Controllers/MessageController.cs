@@ -33,9 +33,9 @@ public class MessageController : ControllerBase
     [HttpGet("{id}/status")]
     public async Task<ActionResult<MessageStatusResponse>> GetMessageStatus(int id)
     {
-        // Validate tenant if multi-tenant mode is enabled
+        // Validate tenant (always required in multi-tenant architecture)
         var tenantValidation = await ValidateTenantAsync();
-        if (tenantValidation.Tenant == null && IsMultiTenantEnabled())
+        if (tenantValidation.Tenant == null)
         {
             return tenantValidation.ErrorResult!;
         }
@@ -76,9 +76,9 @@ public class MessageController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<List<MessageStatusResponse>>> GetAllMessages()
     {
-        // Validate tenant if multi-tenant mode is enabled
+        // Validate tenant (always required in multi-tenant architecture)
         var tenantValidation = await ValidateTenantAsync();
-        if (tenantValidation.Tenant == null && IsMultiTenantEnabled())
+        if (tenantValidation.Tenant == null)
         {
             return tenantValidation.ErrorResult!;
         }
@@ -112,9 +112,9 @@ public class MessageController : ControllerBase
     [HttpPost("send")]
     public async Task<ActionResult<SendMessageResponse>> SendMessage([FromBody] SendMessageRequest request)
     {
-        // Validate tenant if multi-tenant mode is enabled
+        // Validate tenant (always required in multi-tenant architecture)
         var tenantValidation = await ValidateTenantAsync();
-        if (tenantValidation.Tenant == null && IsMultiTenantEnabled())
+        if (tenantValidation.Tenant == null)
         {
             return tenantValidation.ErrorResult!;
         }
@@ -221,15 +221,10 @@ public class MessageController : ControllerBase
 
     private async Task<(Tenant? Tenant, ActionResult? ErrorResult)> ValidateTenantAsync()
     {
-        if (!IsMultiTenantEnabled())
-        {
-            return (null, null); // Single-tenant mode
-        }
-
         var subscriptionKey = Request.Headers["X-Subscription-Key"].FirstOrDefault();
         if (string.IsNullOrWhiteSpace(subscriptionKey))
         {
-            _logger.LogWarning("Missing X-Subscription-Key header in multi-tenant mode");
+            _logger.LogWarning("Missing X-Subscription-Key header (required for multi-tenant architecture)");
             return (null, Unauthorized("X-Subscription-Key header is required"));
         }
 
@@ -251,10 +246,6 @@ public class MessageController : ControllerBase
         return (tenant, null);
     }
 
-    private bool IsMultiTenantEnabled()
-    {
-        return _configuration.GetValue<bool>("MultiTenantSettings:EnableMultiTenant", false);
-    }
 }
 
 public class MessageStatusResponse

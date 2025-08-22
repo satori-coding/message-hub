@@ -2,27 +2,67 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 🌍 **Environment Strategy** (IMPORTANT)
+
+**MessageHub operates in a MULTI-TENANT ONLY architecture** with three standardized environments:
+
+### **Local Environment** (`appsettings.Local.json`)
+- **Purpose**: Linux development machine (no Azure access)
+- **Database**: SQLite (`sms_database.db`)
+- **SMPP**: localhost simulator via Docker
+- **Async Processing**: RabbitMQ in Docker container
+- **Usage**: `cp appsettings.Local.json appsettings.Development.json && dotnet run`
+
+### **Development Environment** (`appsettings.Development.json`)
+- **Purpose**: Windows machine with corporate network Azure access
+- **Database**: Azure SQL Database
+- **SMPP**: Multi-tenant channel configurations with Azure providers
+- **Async Processing**: Azure Service Bus
+- **Key Vault**: Azure Key Vault integration for secrets
+- **Usage**: Direct `dotnet run` with Azure authentication
+
+### **Test Environment** (`appsettings.Test.json`)
+- **Purpose**: Azure WebApp deployment (production-like)
+- **Database**: SQLite with Fresh Database on Startup (Azure WebApp)
+- **SMPP**: Production SMPP providers per tenant
+- **Async Processing**: Azure Service Bus production endpoints
+- **Key Vault**: Full Azure Key Vault integration
+- **Usage**: Azure WebApp deployment
+
+**Key Points**:
+- ✅ **Multi-tenant only**: Single-tenant code removed completely
+- ✅ **Environment-specific**: Each environment has tailored configuration
+- ✅ **Service Bus ready**: Async processing configured for all environments
+- ✅ **One tenant = one entry**: Simplified multi-tenant (can have just one tenant)
+
+---
+
 ## Project Overview
 
-This is an ASP.NET Core 8.0 Web API SMS service with **consolidated modular channel architecture** for sending SMS via different providers (SMPP, HTTP APIs, etc.). The service features a clean, unified project structure with channel-based organization, stores message status in database, and provides REST endpoints for management and status queries.
+This is an ASP.NET Core 8.0 Web API SMS service with **consolidated multi-tenant architecture** for sending SMS via different providers (SMPP, HTTP APIs, etc.). The service features a clean, unified project structure with channel-based organization, stores message status in database, and provides REST endpoints for management and status queries.
 
 ## Technology Stack
 
 - **Framework**: ASP.NET Core 8.0 (.NET 8)
 - **Language**: C#
+- **Architecture**: Multi-tenant only (single-tenant support removed)
 - **Database**: Entity Framework Core with SQLite (dev) / Azure SQL Server (prod)
 - **SMS Channels**: Consolidated modular architecture with pluggable SMS providers
 - **SMPP Channel**: Direct SMPP implementation with Inetlab.SMPP and connection pooling
 - **HTTP Channel**: Configurable HTTP/REST SMS provider support
+- **Async Processing**: MassTransit with RabbitMQ (local) / Azure Service Bus (cloud)
 - **Configuration**: Azure Key Vault for sensitive settings (with local fallback)
 - **Monitoring**: Application Insights for telemetry and logging
-- **Development Tools**: Docker-based SMPP simulator for testing
+- **Development Tools**: Docker-based SMPP simulator and RabbitMQ for testing
 
 ## Key Dependencies
 
 - `Microsoft.EntityFrameworkCore.SqlServer` (8.0.18) - Database access
 - `Microsoft.EntityFrameworkCore.Sqlite` (8.0.18) - Development database
 - `Inetlab.SMPP` (2.6.0) - SMPP protocol implementation
+- `MassTransit` - Async message processing framework
+- `MassTransit.RabbitMQ` - Local development message transport
+- `MassTransit.Azure.ServiceBus.Core` - Azure Service Bus integration
 - `Azure.Extensions.AspNetCore.Configuration.Secrets` (1.3.2) - Azure Key Vault integration
 - `Microsoft.ApplicationInsights.AspNetCore` (2.22.0) - Telemetry
 - `Microsoft.Extensions.Http` (8.0.1) - HTTP client for HTTP SMS channels
@@ -151,6 +191,89 @@ dotnet test
 # Publish for deployment
 dotnet publish
 ```
+
+### Async Processing Setup
+```bash
+# Start RabbitMQ for local development (Service Bus simulation)
+./scripts/start-rabbitmq.sh
+
+# Stop RabbitMQ
+docker stop messagequeue-rabbitmq
+
+# Remove RabbitMQ container
+docker rm messagequeue-rabbitmq
+```
+
+## 🚀 **Async Processing with MassTransit & Service Bus** (NEW 2025-08-22)
+
+**MessageHub implements queue-based asynchronous message processing** for scalable SMS handling with immediate API responses.
+
+### **Architecture Benefits**
+- ✅ **Immediate API Response**: POST returns with `statusUrl` immediately
+- ✅ **Background Processing**: SMS sending happens asynchronously
+- ✅ **High Scalability**: Message queues handle high-volume SMS processing
+- ✅ **Reliability**: Message persistence with retry logic
+- ✅ **Multi-Environment**: RabbitMQ (local) + Azure Service Bus (cloud)
+
+### **Environment-Specific Transports**
+
+#### **Local Environment** (RabbitMQ)
+```json
+"MassTransitSettings": {
+  "Transport": "RabbitMQ",
+  "RabbitMQ": {
+    "Host": "localhost",
+    "Port": 5672,
+    "Username": "guest",
+    "Password": "guest",
+    "QueueName": "sms-processing-local"
+  }
+}
+```
+**Setup**: `./scripts/start-rabbitmq.sh` (Docker-based)
+**Management UI**: http://localhost:15672 (guest/guest)
+
+#### **Development Environment** (Azure Service Bus)
+```json
+"MassTransitSettings": {
+  "Transport": "AzureServiceBus",
+  "AzureServiceBus": {
+    "ConnectionString": "Endpoint=sb://your-dev-servicebus...",
+    "QueueName": "sms-processing-dev"
+  }
+}
+```
+
+#### **Test/Production Environment** (Azure Service Bus)
+```json
+"MassTransitSettings": {
+  "Transport": "AzureServiceBus",
+  "AzureServiceBus": {
+    "ConnectionString": "Endpoint=sb://your-prod-servicebus...",
+    "QueueName": "sms-processing-prod"
+  }
+}
+```
+
+### **API Response Format**
+```json
+{
+  "id": 123,
+  "status": "Queued for processing", 
+  "statusUrl": "https://api.messagehub.com/api/message/123/status",
+  "message": "Message queued successfully"
+}
+```
+
+### **Required NuGet Packages**
+- `MassTransit` - Core async messaging framework
+- `MassTransit.RabbitMQ` - Local development transport
+- `MassTransit.Azure.ServiceBus.Core` - Azure Service Bus integration
+
+### **Implementation Status**
+⚠️ **Planned Architecture**: Documented and ready for implementation when async processing is needed. See `TODO.md` for complete implementation guide.
+
+---
 
 ## Project Structure (Updated 2025-08-19 - Consolidated Architecture)
 

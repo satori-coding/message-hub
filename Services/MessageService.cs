@@ -16,28 +16,19 @@ public class MessageService
     private readonly ILogger<MessageService> _logger;
     private readonly IConfiguration _configuration;
     private readonly ITenantChannelManager _tenantChannelManager;
-    private readonly Dictionary<ChannelType, IMessageChannel> _legacyChannels; // For backward compatibility
 
     public MessageService(
         ApplicationDbContext dbContext, 
         ILogger<MessageService> logger,
         IConfiguration configuration,
-        ITenantChannelManager tenantChannelManager,
-        IEnumerable<IMessageChannel> legacyChannels)
+        ITenantChannelManager tenantChannelManager)
     {
         _dbContext = dbContext;
         _logger = logger;
         _configuration = configuration;
         _tenantChannelManager = tenantChannelManager;
         
-        // Build dictionary of legacy channels for backward compatibility (single-tenant mode)
-        _legacyChannels = legacyChannels.ToDictionary(c => c.ChannelType, c => c);
-        
-        var isMultiTenant = _configuration.GetValue<bool>("MultiTenantSettings:EnableMultiTenant", false);
-        _logger.LogInformation("MessageService initialized in {Mode} mode with {ChannelCount} legacy channels: {Channels}",
-            isMultiTenant ? "multi-tenant" : "single-tenant",
-            _legacyChannels.Count, 
-            string.Join(", ", _legacyChannels.Values.Select(c => c.ProviderName)));
+        _logger.LogInformation("MessageService initialized in multi-tenant mode");
     }
 
     /// <summary>
@@ -157,17 +148,6 @@ public class MessageService
                     {
                         _logger.LogError("No tenant channel available for tenant {TenantId}, channel {ChannelName} for message ID: {MessageId}", 
                             message.TenantId, channelName ?? "default", messageId);
-                        await UpdateMessageStatusAsync(message, MessageStatus.Failed);
-                        return;
-                    }
-                }
-                else
-                {
-                    // Legacy single-tenant mode
-                    if (!_legacyChannels.TryGetValue(message.ChannelType, out channel))
-                    {
-                        _logger.LogError("No legacy channel available for type {ChannelType} for message ID: {MessageId}", 
-                            message.ChannelType, messageId);
                         await UpdateMessageStatusAsync(message, MessageStatus.Failed);
                         return;
                     }
@@ -318,20 +298,15 @@ public class MessageService
     {
         _logger.LogInformation("Retrieving message with ID: {MessageId} (Tenant: {TenantId})", id, tenantId);
         
-        if (tenantId.HasValue)
+        // Multi-tenant architecture: Tenant ID is required
+        if (!tenantId.HasValue)
         {
-            // Multi-tenant mode: Only return message if it belongs to the tenant
-            return await _dbContext.Messages
-                .Include(m => m.Parts)
-                .FirstOrDefaultAsync(m => m.Id == id && m.TenantId == tenantId);
+            throw new ArgumentException("Tenant ID is required in multi-tenant architecture");
         }
-        else
-        {
-            // Single-tenant mode: Return any message (for backward compatibility)
-            return await _dbContext.Messages
-                .Include(m => m.Parts)
-                .FirstOrDefaultAsync(m => m.Id == id);
-        }
+        
+        return await _dbContext.Messages
+            .Include(m => m.Parts)
+            .FirstOrDefaultAsync(m => m.Id == id && m.TenantId == tenantId);
     }
 
     /// <summary>
@@ -343,21 +318,16 @@ public class MessageService
         
         var query = _dbContext.Messages.Include(m => m.Parts);
         
-        if (tenantId.HasValue)
+        // Multi-tenant architecture: Tenant ID is required
+        if (!tenantId.HasValue)
         {
-            // Multi-tenant mode: Only return messages belonging to the tenant
-            return await query
-                .Where(m => m.TenantId == tenantId)
-                .OrderByDescending(s => s.CreatedAt)
-                .ToListAsync();
+            throw new ArgumentException("Tenant ID is required in multi-tenant architecture");
         }
-        else
-        {
-            // Single-tenant mode: Return all messages (for backward compatibility)
-            return await query
-                .OrderByDescending(s => s.CreatedAt)
-                .ToListAsync();
-        }
+        
+        return await query
+            .Where(m => m.TenantId == tenantId)
+            .OrderByDescending(s => s.CreatedAt)
+            .ToListAsync();
     }
 
     /// <summary>

@@ -1,136 +1,159 @@
-# MessageHub Concurrent Multi-Tenant Testing - TODO
+# MessageHub Async Processing with MassTransit & Service Bus
 
-## 🎯 **Morgen früh: Concurrent Multi-Tenant Tests ausführen**
+## 🚀 **Async Processing Architecture**
 
-**Prompt für Claude**: "Bitte führe die Concurrent Multi-Tenant Tests für MessageHub aus und analysiere die Ergebnisse."
+MessageHub implements **queue-based asynchronous message processing** using MassTransit with environment-specific transports:
 
-## 📋 **Test Execution Plan**
+### **Architecture Benefits**
+- ✅ **Immediate API Response**: POST returns with `statusUrl` immediately
+- ✅ **Background Processing**: SMS sending happens asynchronously in background
+- ✅ **Scalability**: Message queues handle high-volume SMS processing
+- ✅ **Reliability**: Message persistence and retry logic
+- ✅ **Multi-Environment**: RabbitMQ (local) + Azure Service Bus (cloud)
 
-### **Phase 1: System Preparation** (5 Minuten)
-- [ ] **SMPP Simulator starten**: `./scripts/start-smppsim.sh`
-- [ ] **Multi-Tenant Mode aktivieren** in `appsettings.Development.json`:
-  ```json
-  {
-    "MultiTenantSettings": {
-      "EnableMultiTenant": true,
-      "RequireSubscriptionKey": true
-    }
+### **API Response Format**
+```json
+{
+  "id": 123,
+  "status": "Queued for processing", 
+  "statusUrl": "https://api.messagehub.com/api/message/123/status",
+  "message": "Message queued successfully"
+}
+```
+
+## 🌍 **Environment-Specific Configuration**
+
+### **Local Environment** (RabbitMQ)
+```json
+"MassTransitSettings": {
+  "Transport": "RabbitMQ",
+  "RabbitMQ": {
+    "Host": "localhost",
+    "Port": 5672,
+    "Username": "guest",
+    "Password": "guest",
+    "VirtualHost": "/",
+    "QueueName": "sms-processing-local"
   }
-  ```
-- [ ] **MessageHub Service starten**: `dotnet run`
-- [ ] **Services Connectivity prüfen**:
-  - SMPP Simulator: `curl http://localhost:8088`
-  - MessageHub API: `curl -k https://localhost:7142/api/message`
+}
+```
 
-### **Phase 2: Quick Concurrent Test** (2 Minuten)
-- [ ] **Concurrent Access Test ausführen**: `./scripts/concurrent-tenant-test.sh`
-- [ ] **Ergebnisse analysieren**:
-  - Simultaneous Channel Creation: PASSED/FAILED
-  - High-Volume Concurrent Load: X/30 successful
-  - Tenant Data Isolation: PASSED/FAILED
-  - SMPP Connection Pool Isolation: PASSED/FAILED
-  - Error Handling: PASSED/FAILED
+**Setup**: `./scripts/start-rabbitmq.sh` (Docker-based)
 
-### **Phase 3: Load Test** (5 Minuten) 
-- [ ] **Load Test ausführen**: `./scripts/tenant-load-test.sh`
-- [ ] **Performance Metriken bewerten**:
-  - Success Rate: X% (≥90% erwartet)
-  - Requests per Second: X RPS (≥1.0 erwartet)  
-  - Database Integrity: Alle Tenants haben Daten
-  - Memory Usage: Reasonable limits
-  - Per-Tenant Performance: Response times
+### **Development Environment** (Azure Service Bus)
+```json
+"MassTransitSettings": {
+  "Transport": "AzureServiceBus",
+  "AzureServiceBus": {
+    "ConnectionString": "Endpoint=sb://your-dev-servicebus.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=your-dev-key",
+    "QueueName": "sms-processing-dev"
+  }
+}
+```
 
-### **Phase 4: Memory Test** (Optional - 10 Minuten)
-- [ ] **Memory Test ausführen**: `./scripts/tenant-memory-test.sh`
-- [ ] **Memory Leak Assessment**:
-  - Memory Growth: X MB (<150MB threshold)
-  - Growth Rate: X MB/min (<2MB/min threshold)
-  - Channel Health: X/3 healthy nach Test
-  - Connection Cleanup: Verification successful
+### **Test/Production Environment** (Azure Service Bus)
+```json
+"MassTransitSettings": {
+  "Transport": "AzureServiceBus",
+  "AzureServiceBus": {
+    "ConnectionString": "Endpoint=sb://your-prod-servicebus.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=your-prod-key",
+    "QueueName": "sms-processing-prod"
+  }
+}
+```
 
-## 📊 **Results Analysis Checklist**
+## 📦 **Required NuGet Packages**
 
-### **✅ Success Indicators zu prüfen:**
-- [ ] **Concurrent Test**: "ALL CONCURRENT MULTI-TENANT TESTS PASSED"
-- [ ] **Load Test**: "MULTI-TENANT LOAD TEST PASSED" mit >90% Success Rate  
-- [ ] **Memory Test**: "MULTI-TENANT MEMORY TEST PASSED" mit <150MB Growth
+```xml
+<PackageReference Include="MassTransit" Version="8.1.3" />
+<PackageReference Include="MassTransit.RabbitMQ" Version="8.1.3" />
+<PackageReference Include="MassTransit.Azure.ServiceBus.Core" Version="8.1.3" />
+```
 
-### **❌ Failure Indicators zu untersuchen:**
-- [ ] Channel Creation Race Conditions → Check `TenantChannelManager` locks
-- [ ] Database Race Conditions → Check Entity Framework transaction handling  
-- [ ] Memory Leaks → Check `SmppConnection.Dispose()` und Channel cleanup
-- [ ] SMPP Connection Conflicts → Check Connection Pool isolation
+## 🏗️ **Implementation Components**
 
-## 🔍 **Debugging Actions (if needed)**
+### **Message Contract**
+```csharp
+public record SendMessageCommand(
+    string PhoneNumber,
+    string Content, 
+    ChannelType ChannelType,
+    int? TenantId,
+    string? ChannelName,
+    int MessageId); // DB Message ID
+```
 
-### **Bei Test Failures:**
-- [ ] **Log Analysis durchführen**:
-  ```bash
-  dotnet run | grep "Tenant:"
-  dotnet run | grep "TenantChannelManager"  
-  dotnet run | grep "SmppChannel.*connection"
-  ```
+### **Message Consumer**
+```csharp
+public class SendMessageConsumer : IConsumer<SendMessageCommand>
+{
+    public async Task Consume(ConsumeContext<SendMessageCommand> context)
+    {
+        // Process SMS sending asynchronously
+        // Update message status in database
+        // Handle retries and error cases
+    }
+}
+```
 
-- [ ] **Database Inspection**:
-  ```bash
-  sqlite3 sms_database.db "SELECT TenantId, COUNT(*) FROM Messages GROUP BY TenantId;"
-  ```
+### **Controller Changes**
+```csharp
+[HttpPost("send")]
+public async Task<ActionResult<MessageResponse>> SendMessage([FromBody] SendMessageRequest request)
+{
+    // Create message in DB with "Queued" status
+    var message = await _messageService.CreateMessageAsync(request);
+    
+    // Queue message for background processing
+    await _publishEndpoint.Publish(new SendMessageCommand(...));
+    
+    // Return immediate response with status URL
+    return Ok(new MessageResponse
+    {
+        Id = message.Id,
+        Status = "Queued for processing",
+        StatusUrl = $"/api/message/{message.Id}/status",
+        Message = "Message queued successfully"
+    });
+}
+```
 
-- [ ] **Memory Analysis**:
-  ```bash
-  cat /tmp/memory_samples.csv
-  cat /tmp/resource_monitoring.log
-  ```
+## 🛠️ **Development Scripts**
 
-## 📈 **Expected Performance Baselines**
+### **Start RabbitMQ (Local)**
+```bash
+# Create script: scripts/start-rabbitmq.sh
+#!/bin/bash
+docker run -d --name messagequeue-rabbitmq \
+  -p 15672:15672 -p 5672:5672 \
+  masstransit/rabbitmq
 
-### **Benchmark Comparison:**
-| Metric | Single-Tenant | Multi-Tenant Target | Max Degradation |
-|--------|---------------|-------------------|-----------------|
-| SMS Send Time | ~228ms | ~280ms | <25% |
-| Requests/Second | 4.0 RPS | 3.0 RPS | <25% |  
-| Memory Usage | 120MB | 200MB | <65% |
-| Success Rate | 98% | 90% | <10% |
+echo "RabbitMQ Management UI: http://localhost:15672 (guest/guest)"
+```
 
-## 🎯 **Final Assessment Criteria**
+### **Service Bus Simulation**
+For local development without Azure access, RabbitMQ provides full Service Bus simulation:
+- Message persistence
+- Dead letter queues
+- Retry mechanisms
+- Management UI
 
-### **PASS Criteria:**
-- [ ] **Concurrent Test**: Alle 5 Test-Szenarien bestanden
-- [ ] **Load Test**: >90% Success Rate UND >1.0 RPS  
-- [ ] **Memory Test**: <150MB Growth UND alle Channels healthy
-- [ ] **Tenant Isolation**: Cross-tenant access blockiert (404/403)
-- [ ] **Performance**: <25% Degradation vs Single-Tenant
+## 🎯 **Next Implementation Steps**
 
-### **Production Ready Assessment:**
-- [ ] Alle Critical Tests: PASSED
-- [ ] Performance innerhalb acceptable limits
-- [ ] Keine Memory Leaks detected  
-- [ ] Thread Safety validated
-- [ ] Connection Pool Isolation confirmed
+1. **Add MassTransit NuGet packages**
+2. **Create message contracts and consumers**
+3. **Update Program.cs with MassTransit configuration**
+4. **Modify MessageController for async processing**
+5. **Create RabbitMQ startup script**
+6. **Test with all three environments**
 
-## 📝 **Documentation Updates (if needed)**
+## 📊 **Monitoring & Observability**
 
-### **Bei neuen Findings:**
-- [ ] Update `Documentation/ConcurrentMultiTenantTesting.md`
-- [ ] Update Performance Baselines in `CLAUDE.md`
-- [ ] Add any new debugging procedures
-- [ ] Document any configuration adjustments
-
-## 🚀 **Next Steps nach Testing**
-
-### **Bei SUCCESS:**
-- [ ] Document actual performance metrics achieved
-- [ ] Update production monitoring recommendations
-- [ ] Confirm production deployment readiness
-
-### **Bei FAILURES:**  
-- [ ] Create detailed failure analysis report
-- [ ] Implement fixes for identified issues
-- [ ] Re-run failed tests after fixes
-- [ ] Update test scripts if needed
+- **RabbitMQ Management**: http://localhost:15672 (local)
+- **Azure Service Bus Metrics**: Azure Portal monitoring
+- **Application Insights**: Message processing telemetry
+- **Database Status Tracking**: Real-time message status updates
 
 ---
 
-**READY TO EXECUTE**: Das komplette Concurrent Multi-Tenant Test System ist implementiert und bereit für Ausführung! 🎯
-
-**Prompt für morgen**: *"Bitte führe die Concurrent Multi-Tenant Tests für MessageHub aus und analysiere die Ergebnisse."*
+**Status**: Architecture planned and documented. Ready for implementation when async processing is needed.
