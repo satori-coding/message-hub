@@ -117,7 +117,8 @@ builder.Services.AddMassTransit(x =>
 });
 
 // Add Background Services
-builder.Services.AddHostedService<MessageHub.Services.MessageCleanupService>();
+// MessageCleanupService removed - DLR handling now done immediately when ExpectDeliveryReceipts=false
+// builder.Services.AddHostedService<MessageHub.Services.MessageCleanupService>();
 
 var app = builder.Build();
 

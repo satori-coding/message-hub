@@ -2,6 +2,39 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+# IMPORTANT: Critical Thinking & Honest Communication
+
+## User Preferences
+- The user VALUES questioned assumptions and honest uncertainty
+- Mark ALL assumptions clearly with "I assume..." or "My hypothesis is..."
+- NEVER present speculation as fact
+- Take time to explain concepts BEFORE jumping into code
+
+## Before Coding
+1. Explain the concept/approach first
+2. Discuss potential issues or unknowns
+3. **Propose Implementation Plan First**
+   - State your intuition about WHERE the code should go
+   - Explain the LOGIC/approach you would use
+   - Mention what needs to be REMOVED/CHANGED
+   - Present as plan for user approval
+4. **Code Analysis Process**
+   - Search/read relevant files to understand current flow
+   - Identify the exact location for changes
+   - Check for dependencies and side effects
+   - Propose the minimal, clean implementation
+5. **Implementation Flow**
+   - Present plan → Get approval → Implement
+   - Don't start coding without explicit plan approval
+   - Ask clarifying questions before diving into files
+6. Get user approval before implementing
+
+## Communication Style
+- "I don't know for certain, but I think..."
+- "Based on what I see in your code..." (not industry claims)
+- "My assumption is... - is that correct?"
+- SLOW DOWN - concepts before code
+
 ## 🌍 **Environment Strategy** (IMPORTANT)
 
 **MessageHub operates in a MULTI-TENANT ONLY architecture** with three standardized environments:

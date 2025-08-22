@@ -16,17 +16,20 @@ public class MessageService
     private readonly ILogger<MessageService> _logger;
     private readonly IConfiguration _configuration;
     private readonly ITenantChannelManager _tenantChannelManager;
+    private readonly ITenantService _tenantService;
 
     public MessageService(
         ApplicationDbContext dbContext, 
         ILogger<MessageService> logger,
         IConfiguration configuration,
-        ITenantChannelManager tenantChannelManager)
+        ITenantChannelManager tenantChannelManager,
+        ITenantService tenantService)
     {
         _dbContext = dbContext;
         _logger = logger;
         _configuration = configuration;
         _tenantChannelManager = tenantChannelManager;
+        _tenantService = tenantService;
         
         _logger.LogInformation("MessageService initialized in multi-tenant mode");
     }
@@ -139,6 +142,7 @@ public class MessageService
             try
             {
                 IMessageChannel? channel = null;
+                string? actualChannelName = channelName;
                 
                 // Multi-tenant mode: Get tenant-specific channel
                 if (message.TenantId.HasValue)
@@ -150,6 +154,13 @@ public class MessageService
                             message.TenantId, channelName ?? "default", messageId);
                         await UpdateMessageStatusAsync(message, MessageStatus.Failed);
                         return;
+                    }
+                    
+                    // If no channel name was specified, get the default channel name
+                    if (string.IsNullOrWhiteSpace(actualChannelName))
+                    {
+                        var defaultConfig = await _tenantService.GetDefaultChannelConfigurationAsync(message.TenantId.Value);
+                        actualChannelName = defaultConfig?.ChannelName;
                     }
                 }
 
@@ -179,6 +190,19 @@ public class MessageService
                     if (message.ChannelType == ChannelType.SMPP && result.MessageParts > 1 && result.ProviderMessageIds.Any())
                     {
                         await CreateMessagePartsAsync(message, result.ProviderMessageIds);
+                    }
+                    
+                    // Check if delivery receipts are supported for this channel
+                    if (message.TenantId.HasValue && !string.IsNullOrWhiteSpace(actualChannelName))
+                    {
+                        var channelConfig = await _tenantService.GetChannelConfigurationAsync(
+                            message.TenantId.Value, actualChannelName);
+                        
+                        if (channelConfig is TenantSmppConfiguration smppConfig && 
+                            !smppConfig.ExpectDeliveryReceipts)
+                        {
+                            message.DeliveryStatus = "DLR_NOT_SUPPORTED";
+                        }
                     }
                     
                     await UpdateMessageStatusAsync(message, MessageStatus.Sent);

@@ -1,228 +1,127 @@
-# MessageHub SMS API Tests
+# MessageHub SMS API Tests - LOCAL DEVELOPMENT
 # Installiere die "REST Client" Extension in VS Code
 # Dann kannst du auf "Send Request" über jeder ### Zeile klicken
 
 ### Variablen für lokale Entwicklung
 @baseUrl = https://localhost:7142/api/message
 @baseUrlHttp = http://localhost:5289/api/message
+@localTenantKey = local-demo-12345
 
-### 1. SMS senden (POST)
+### 1. SMS senden via SMPP (POST)
 POST {{baseUrl}}/send
 Content-Type: application/json
+X-Subscription-Key: {{localTenantKey}}
 
 {
   "PhoneNumber": "+49123456789",
   "Content": "Hallo! Dies ist eine Test-SMS von der API.",
-  "ChannelType": 0
+  "ChannelName": "localhost-smpp"
 }
 
-### 2. SMS senden mit längerer Nachricht
+### 2. SMS senden mit längerer Nachricht (Multi-Part Test)
 POST {{baseUrl}}/send
 Content-Type: application/json
+X-Subscription-Key: {{localTenantKey}}
 
 {
   "PhoneNumber": "+49987654321", 
-  "Content": "Dies ist eine längere Test-Nachricht um zu prüfen, ob längere SMS-Inhalte korrekt verarbeitet werden. Die Nachricht sollte erfolgreich gespeichert und versendet werden.",
-  "ChannelType": 1
+  "Content": "Dies ist eine längere Test-Nachricht um zu prüfen, ob längere SMS-Inhalte korrekt verarbeitet werden. Die Nachricht sollte erfolgreich gespeichert und versendet werden und eventuell in mehrere Teile aufgeteilt werden.",
+  "ChannelName": "localhost-smpp"
 }
 
 ### 3. SMS senden - Fehlerfall (leere Telefonnummer)
 POST {{baseUrl}}/send
 Content-Type: application/json
+X-Subscription-Key: {{localTenantKey}}
 
 {
   "PhoneNumber": "",
   "Content": "Test Nachricht",
-  "ChannelType": 0
+  "ChannelName": "localhost-smpp"
 }
 
-### 4. SMS senden - Fehlerfall (zu lange Nachricht)
+### 4. SMS senden mit sehr langer Nachricht (Multi-Part)
 POST {{baseUrl}}/send
 Content-Type: application/json
+X-Subscription-Key: {{localTenantKey}}
 
 {
   "PhoneNumber": "+49123456789",
-  "Content": "Diese Nachricht ist viel zu lang und sollte einen Fehler verursachen, da sie über 1000 Zeichen hat. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem.",
-  "ChannelType": 0
+  "Content": "Diese Nachricht ist sehr lang und sollte in mehrere SMS-Teile aufgeteilt werden. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.",
+  "ChannelName": "localhost-smpp"
 }
 
 ### 5. Alle SMS Nachrichten abrufen (GET)
 GET {{baseUrl}}
 Accept: application/json
+X-Subscription-Key: {{localTenantKey}}
 
 ### 6. Spezifische SMS Status abrufen (GET) - ID 1
 GET {{baseUrl}}/1/status
 Accept: application/json
+X-Subscription-Key: {{localTenantKey}}
 
 ### 7. Spezifische SMS Status abrufen (GET) - ID 2  
 GET {{baseUrl}}/2/status
 Accept: application/json
+X-Subscription-Key: {{localTenantKey}}
 
 ### 8. SMS Status abrufen - nicht existierende ID
 GET {{baseUrl}}/999/status
 Accept: application/json
+X-Subscription-Key: {{localTenantKey}}
 
 ### 9. Health Check - Swagger UI
 GET {{baseUrl}}/../../swagger
 Accept: text/html
 
-### Alternative HTTP (ohne HTTPS) für lokale Tests
+### 10. Alternative HTTP (ohne HTTPS) für lokale Tests
 
 ### SMS senden via HTTP
 POST {{baseUrlHttp}}/send
 Content-Type: application/json
+X-Subscription-Key: {{localTenantKey}}
 
 {
   "PhoneNumber": "+49111222333",
   "Content": "Test SMS über HTTP",
-  "ChannelType": 1
+  "ChannelName": "localhost-smpp"
 }
 
 ### Alle SMS via HTTP abrufen
 GET {{baseUrlHttp}}
 Accept: application/json
+X-Subscription-Key: {{localTenantKey}}
 
 ###########################################
-### MULTI-TENANT API TESTS 
-### (Verwende appsettings.DevelopmentMultiTenant.json)
+### 🚫 ERROR TESTS & SECURITY 
 ###########################################
 
-### Multi-Tenant Variablen
-@tenantAKey = dev-tenant-a-12345
-@tenantBKey = dev-tenant-b-67890
-@tenantCKey = dev-tenant-c-http-99999
-@invalidKey = invalid-subscription-key-test
-
-### 🏢 Tenant A Tests (SMPP + HTTP Fallback)
-
-### Tenant A - SMPP Channel senden
-POST {{baseUrl}}/send
-Content-Type: application/json
-X-Subscription-Key: {{tenantAKey}}
-
-{
-  "PhoneNumber": "+49555111222",
-  "Content": "Hallo von Tenant A über SMPP!",
-  "ChannelName": "localhost-smpp"
-}
-
-### Tenant A - HTTP Fallback Channel senden
-POST {{baseUrl}}/send
-Content-Type: application/json
-X-Subscription-Key: {{tenantAKey}}
-
-{
-  "PhoneNumber": "+49555111333",
-  "Content": "Hallo von Tenant A über HTTP Fallback!",
-  "ChannelName": "httpbin-fallback"
-}
-
-### Tenant A - Default Channel (sollte SMPP sein)
-POST {{baseUrl}}/send
-Content-Type: application/json
-X-Subscription-Key: {{tenantAKey}}
-
-{
-  "PhoneNumber": "+49555111444",
-  "Content": "Tenant A mit default channel",
-  "ChannelType": 0
-}
-
-### Tenant A - Nachrichten abrufen (sollte nur eigene sehen)
-GET {{baseUrl}}
-Accept: application/json
-X-Subscription-Key: {{tenantAKey}}
-
-### Tenant A - Spezifische Nachricht abrufen
-GET {{baseUrl}}/1/status
-Accept: application/json
-X-Subscription-Key: {{tenantAKey}}
-
-### 🏢 Tenant B Tests (Nur SMPP)
-
-### Tenant B - SMPP Channel senden
-POST {{baseUrl}}/send
-Content-Type: application/json
-X-Subscription-Key: {{tenantBKey}}
-
-{
-  "PhoneNumber": "+49666222333",
-  "Content": "Hallo von Tenant B über SMPP!",
-  "ChannelName": "localhost-smpp-alt"
-}
-
-### Tenant B - Nachrichten abrufen (sollte nur eigene sehen)
-GET {{baseUrl}}
-Accept: application/json
-X-Subscription-Key: {{tenantBKey}}
-
-### Tenant B - Versucht Tenant A Nachricht abzurufen (sollte fehlschlagen)
-GET {{baseUrl}}/1/status
-Accept: application/json
-X-Subscription-Key: {{tenantBKey}}
-
-### 🏢 Tenant C Tests (Nur HTTP Channels)
-
-### Tenant C - Primary HTTP Channel
-POST {{baseUrl}}/send
-Content-Type: application/json
-X-Subscription-Key: {{tenantCKey}}
-
-{
-  "PhoneNumber": "+49777333444",
-  "Content": "Tenant C über HTTP Primary Channel!",
-  "ChannelName": "httpbin-primary"
-}
-
-### Tenant C - Backup HTTP Channel
-POST {{baseUrl}}/send
-Content-Type: application/json
-X-Subscription-Key: {{tenantCKey}}
-
-{
-  "PhoneNumber": "+49777333555",
-  "Content": "Tenant C über HTTP Backup Channel!",
-  "ChannelName": "postman-echo-backup"
-}
-
-### Tenant C - Default Channel (sollte HTTP sein)
-POST {{baseUrl}}/send
-Content-Type: application/json
-X-Subscription-Key: {{tenantCKey}}
-
-{
-  "PhoneNumber": "+49777333666",
-  "Content": "Tenant C mit default HTTP channel",
-  "ChannelType": 1
-}
-
-### 🚫 Security & Error Tests
-
-### Fehlschlag - Kein Subscription Key (Multi-Tenant Mode)
+### Fehlschlag - Kein Subscription Key
 POST {{baseUrl}}/send
 Content-Type: application/json
 
 {
   "PhoneNumber": "+49888444555",
-  "Content": "Diese Nachricht sollte fehlschlagen",
-  "ChannelType": 0
+  "Content": "Diese Nachricht sollte fehlschlagen - kein Key",
+  "ChannelName": "localhost-smpp"
 }
 
 ### Fehlschlag - Ungültiger Subscription Key
 POST {{baseUrl}}/send
 Content-Type: application/json
-X-Subscription-Key: {{invalidKey}}
+X-Subscription-Key: invalid-key-test-12345
 
 {
   "PhoneNumber": "+49888444666",
-  "Content": "Diese Nachricht sollte auch fehlschlagen",
-  "ChannelType": 0
+  "Content": "Diese Nachricht sollte auch fehlschlagen - ungültiger Key",
+  "ChannelName": "localhost-smpp"
 }
 
-### Fehlschlag - Tenant versucht nicht existierenden Channel
+### Fehlschlag - Nicht existierender Channel
 POST {{baseUrl}}/send
 Content-Type: application/json
-X-Subscription-Key: {{tenantAKey}}
+X-Subscription-Key: {{localTenantKey}}
 
 {
   "PhoneNumber": "+49888444777",
@@ -230,20 +129,43 @@ X-Subscription-Key: {{tenantAKey}}
   "ChannelName": "non-existent-channel"
 }
 
-### Tenant Isolation Test - Tenant A versucht alle Nachrichten zu sehen
+### Nachrichten ohne Key abrufen (sollte fehlschlagen)
 GET {{baseUrl}}
 Accept: application/json
-X-Subscription-Key: {{tenantAKey}}
 
-### 🔧 Channel Health Tests
+###########################################
+### 📊 PERFORMANCE & LOAD TESTS
+###########################################
 
-### Test verschiedener Channel-Kombinationen pro Tenant
+### Schneller Burst Test - 3 SMS hintereinander
 POST {{baseUrl}}/send
 Content-Type: application/json
-X-Subscription-Key: {{tenantAKey}}
+X-Subscription-Key: {{localTenantKey}}
 
 {
-  "PhoneNumber": "+49999111222",
-  "Content": "Multi-Part Test: Dies ist eine längere Test-Nachricht um zu prüfen ob Multi-Part SMS korrekt über tenant-spezifische SMPP Kanäle verarbeitet werden. Jeder Tenant sollte seine eigenen Connection Pools haben und die Nachrichten sollten isoliert verarbeitet werden. Das ist ein Test der Tenant-Isolation und Multi-Part SMS Funktionalität.",
+  "PhoneNumber": "+49999111001",
+  "Content": "Burst Test SMS #1",
+  "ChannelName": "localhost-smpp"
+}
+
+###
+POST {{baseUrl}}/send
+Content-Type: application/json
+X-Subscription-Key: {{localTenantKey}}
+
+{
+  "PhoneNumber": "+49999111002",
+  "Content": "Burst Test SMS #2",
+  "ChannelName": "localhost-smpp"
+}
+
+###
+POST {{baseUrl}}/send
+Content-Type: application/json
+X-Subscription-Key: {{localTenantKey}}
+
+{
+  "PhoneNumber": "+49999111003",
+  "Content": "Burst Test SMS #3",
   "ChannelName": "localhost-smpp"
 }
