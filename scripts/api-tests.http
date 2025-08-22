@@ -81,3 +81,169 @@ Content-Type: application/json
 ### Alle SMS via HTTP abrufen
 GET {{baseUrlHttp}}
 Accept: application/json
+
+###########################################
+### MULTI-TENANT API TESTS 
+### (Verwende appsettings.DevelopmentMultiTenant.json)
+###########################################
+
+### Multi-Tenant Variablen
+@tenantAKey = dev-tenant-a-12345
+@tenantBKey = dev-tenant-b-67890
+@tenantCKey = dev-tenant-c-http-99999
+@invalidKey = invalid-subscription-key-test
+
+### 🏢 Tenant A Tests (SMPP + HTTP Fallback)
+
+### Tenant A - SMPP Channel senden
+POST {{baseUrl}}/send
+Content-Type: application/json
+X-Subscription-Key: {{tenantAKey}}
+
+{
+  "PhoneNumber": "+49555111222",
+  "Content": "Hallo von Tenant A über SMPP!",
+  "ChannelName": "localhost-smpp"
+}
+
+### Tenant A - HTTP Fallback Channel senden
+POST {{baseUrl}}/send
+Content-Type: application/json
+X-Subscription-Key: {{tenantAKey}}
+
+{
+  "PhoneNumber": "+49555111333",
+  "Content": "Hallo von Tenant A über HTTP Fallback!",
+  "ChannelName": "httpbin-fallback"
+}
+
+### Tenant A - Default Channel (sollte SMPP sein)
+POST {{baseUrl}}/send
+Content-Type: application/json
+X-Subscription-Key: {{tenantAKey}}
+
+{
+  "PhoneNumber": "+49555111444",
+  "Content": "Tenant A mit default channel",
+  "ChannelType": 0
+}
+
+### Tenant A - Nachrichten abrufen (sollte nur eigene sehen)
+GET {{baseUrl}}
+Accept: application/json
+X-Subscription-Key: {{tenantAKey}}
+
+### Tenant A - Spezifische Nachricht abrufen
+GET {{baseUrl}}/1/status
+Accept: application/json
+X-Subscription-Key: {{tenantAKey}}
+
+### 🏢 Tenant B Tests (Nur SMPP)
+
+### Tenant B - SMPP Channel senden
+POST {{baseUrl}}/send
+Content-Type: application/json
+X-Subscription-Key: {{tenantBKey}}
+
+{
+  "PhoneNumber": "+49666222333",
+  "Content": "Hallo von Tenant B über SMPP!",
+  "ChannelName": "localhost-smpp-alt"
+}
+
+### Tenant B - Nachrichten abrufen (sollte nur eigene sehen)
+GET {{baseUrl}}
+Accept: application/json
+X-Subscription-Key: {{tenantBKey}}
+
+### Tenant B - Versucht Tenant A Nachricht abzurufen (sollte fehlschlagen)
+GET {{baseUrl}}/1/status
+Accept: application/json
+X-Subscription-Key: {{tenantBKey}}
+
+### 🏢 Tenant C Tests (Nur HTTP Channels)
+
+### Tenant C - Primary HTTP Channel
+POST {{baseUrl}}/send
+Content-Type: application/json
+X-Subscription-Key: {{tenantCKey}}
+
+{
+  "PhoneNumber": "+49777333444",
+  "Content": "Tenant C über HTTP Primary Channel!",
+  "ChannelName": "httpbin-primary"
+}
+
+### Tenant C - Backup HTTP Channel
+POST {{baseUrl}}/send
+Content-Type: application/json
+X-Subscription-Key: {{tenantCKey}}
+
+{
+  "PhoneNumber": "+49777333555",
+  "Content": "Tenant C über HTTP Backup Channel!",
+  "ChannelName": "postman-echo-backup"
+}
+
+### Tenant C - Default Channel (sollte HTTP sein)
+POST {{baseUrl}}/send
+Content-Type: application/json
+X-Subscription-Key: {{tenantCKey}}
+
+{
+  "PhoneNumber": "+49777333666",
+  "Content": "Tenant C mit default HTTP channel",
+  "ChannelType": 1
+}
+
+### 🚫 Security & Error Tests
+
+### Fehlschlag - Kein Subscription Key (Multi-Tenant Mode)
+POST {{baseUrl}}/send
+Content-Type: application/json
+
+{
+  "PhoneNumber": "+49888444555",
+  "Content": "Diese Nachricht sollte fehlschlagen",
+  "ChannelType": 0
+}
+
+### Fehlschlag - Ungültiger Subscription Key
+POST {{baseUrl}}/send
+Content-Type: application/json
+X-Subscription-Key: {{invalidKey}}
+
+{
+  "PhoneNumber": "+49888444666",
+  "Content": "Diese Nachricht sollte auch fehlschlagen",
+  "ChannelType": 0
+}
+
+### Fehlschlag - Tenant versucht nicht existierenden Channel
+POST {{baseUrl}}/send
+Content-Type: application/json
+X-Subscription-Key: {{tenantAKey}}
+
+{
+  "PhoneNumber": "+49888444777",
+  "Content": "Ungültiger Channel Test",
+  "ChannelName": "non-existent-channel"
+}
+
+### Tenant Isolation Test - Tenant A versucht alle Nachrichten zu sehen
+GET {{baseUrl}}
+Accept: application/json
+X-Subscription-Key: {{tenantAKey}}
+
+### 🔧 Channel Health Tests
+
+### Test verschiedener Channel-Kombinationen pro Tenant
+POST {{baseUrl}}/send
+Content-Type: application/json
+X-Subscription-Key: {{tenantAKey}}
+
+{
+  "PhoneNumber": "+49999111222",
+  "Content": "Multi-Part Test: Dies ist eine längere Test-Nachricht um zu prüfen ob Multi-Part SMS korrekt über tenant-spezifische SMPP Kanäle verarbeitet werden. Jeder Tenant sollte seine eigenen Connection Pools haben und die Nachrichten sollten isoliert verarbeitet werden. Das ist ein Test der Tenant-Isolation und Multi-Part SMS Funktionalität.",
+  "ChannelName": "localhost-smpp"
+}

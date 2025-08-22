@@ -5,6 +5,8 @@ using MessageHub;
 using MessageHub.Channels.Smpp;
 using MessageHub.Channels.Http;
 using MessageHub.Channels.Shared;
+using MessageHub.Services;
+using MassTransit;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -77,8 +79,42 @@ builder.Services.AddScoped<IEnumerable<IMessageChannel>>(serviceProvider =>
     return channels;
 });
 
+// Add Multi-Tenant Services
+builder.Services.AddScoped<ITenantService, TenantService>();
+builder.Services.AddScoped<ITenantChannelManager, TenantChannelManager>();
+
 // Add Message Service
 builder.Services.AddScoped<MessageService>();
+
+// Add HTTP Client Factory for tenant channels
+builder.Services.AddHttpClient();
+
+// Add MassTransit with RabbitMQ for async message processing
+builder.Services.AddMassTransit(x =>
+{
+    // Add the MessageWorker consumer
+    x.AddConsumer<MessageWorker>();
+    
+    // Configure RabbitMQ transport
+    x.UsingRabbitMq((context, cfg) =>
+    {
+        // Get RabbitMQ connection settings
+        var connectionString = builder.Configuration.GetConnectionString("RabbitMQ") 
+                              ?? "amqp://guest:guest@localhost:5672/";
+        
+        cfg.Host(connectionString);
+        
+        // Configure the SMS queue with retry policy
+        cfg.ReceiveEndpoint("sms-queue", e =>
+        {
+            // Retry policy: 3 retries with 5-second intervals
+            e.UseMessageRetry(r => r.Interval(3, TimeSpan.FromSeconds(5)));
+            
+            // Configure the MessageWorker consumer
+            e.ConfigureConsumer<MessageWorker>(context);
+        });
+    });
+});
 
 // Add Background Services
 builder.Services.AddHostedService<MessageHub.Services.MessageCleanupService>();
@@ -144,6 +180,10 @@ using (var scope = app.Services.CreateScope())
             await context.Database.EnsureDeletedAsync();
             await context.Database.EnsureCreatedAsync();
             await SeedDatabaseAsync(context, logger);
+            
+            // Seed tenants from configuration if multi-tenant mode is enabled
+            await TenantSeedingService.SeedTenantsFromConfigurationAsync(context, builder.Configuration, logger);
+            
             logger.LogInformation("Fresh SQLite database created and seeded");
         }
         else
@@ -151,6 +191,10 @@ using (var scope = app.Services.CreateScope())
             // Local/Production (Linux Laptop): Persistent database with migrations  
             logger.LogInformation("Ensuring persistent database for Local environment (Linux Laptop)");
             await context.Database.EnsureCreatedAsync();
+            
+            // Seed tenants from configuration if multi-tenant mode is enabled and no tenants exist
+            await TenantSeedingService.SeedTenantsFromConfigurationAsync(context, builder.Configuration, logger);
+            
             logger.LogInformation("SQLite database ensured at: {DatabasePath}", 
                 Path.Combine(Directory.GetCurrentDirectory(), "sms_database.db"));
         }

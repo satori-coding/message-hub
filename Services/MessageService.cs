@@ -2,40 +2,104 @@ using Microsoft.EntityFrameworkCore;
 using MessageHub.Channels.Smpp;
 using MessageHub.Channels.Http;
 using MessageHub.Channels.Shared;
+using MessageHub.Services;
+using MessageHub.DomainModels;
 
 namespace MessageHub;
 
 /// <summary>
-/// Service for handling message operations using multiple channels (SMPP, HTTP, Email, Push, etc.)
+/// Service for handling message operations using multiple channels with multi-tenant support
 /// </summary>
 public class MessageService
 {
     private readonly ApplicationDbContext _dbContext;
     private readonly ILogger<MessageService> _logger;
-    private readonly ISmppChannel _smppChannel;
-    private readonly Dictionary<ChannelType, IMessageChannel> _messageChannels;
+    private readonly IConfiguration _configuration;
+    private readonly ITenantChannelManager _tenantChannelManager;
+    private readonly Dictionary<ChannelType, IMessageChannel> _legacyChannels; // For backward compatibility
 
-    public MessageService(ApplicationDbContext dbContext, ILogger<MessageService> logger, 
-                      ISmppChannel smppChannel, IEnumerable<IMessageChannel> messageChannels)
+    public MessageService(
+        ApplicationDbContext dbContext, 
+        ILogger<MessageService> logger,
+        IConfiguration configuration,
+        ITenantChannelManager tenantChannelManager,
+        IEnumerable<IMessageChannel> legacyChannels)
     {
         _dbContext = dbContext;
         _logger = logger;
-        _smppChannel = smppChannel;
+        _configuration = configuration;
+        _tenantChannelManager = tenantChannelManager;
         
-        // Build dictionary of available channels by type
-        _messageChannels = messageChannels.ToDictionary(c => c.ChannelType, c => c);
+        // Build dictionary of legacy channels for backward compatibility (single-tenant mode)
+        _legacyChannels = legacyChannels.ToDictionary(c => c.ChannelType, c => c);
         
-        _logger.LogInformation("MessageService initialized with {ChannelCount} channels: {Channels}",
-            _messageChannels.Count, string.Join(", ", _messageChannels.Values.Select(c => c.ProviderName)));
+        var isMultiTenant = _configuration.GetValue<bool>("MultiTenantSettings:EnableMultiTenant", false);
+        _logger.LogInformation("MessageService initialized in {Mode} mode with {ChannelCount} legacy channels: {Channels}",
+            isMultiTenant ? "multi-tenant" : "single-tenant",
+            _legacyChannels.Count, 
+            string.Join(", ", _legacyChannels.Values.Select(c => c.ProviderName)));
     }
 
     /// <summary>
-    /// Creates and sends a message directly using the specified channel
+    /// Creates a new message in the database with Queued status for background processing
     /// </summary>
-    public async Task<Message> CreateAndSendMessageAsync(string recipient, string content, ChannelType channelType = ChannelType.SMPP)
+    public async Task<Message> CreateMessageAsync(
+        string recipient, 
+        string content, 
+        ChannelType channelType = ChannelType.SMPP,
+        int? tenantId = null)
+    {
+        _logger.LogInformation("Creating new message for queue processing to {Recipient}, Content length: {ContentLength}", 
+            recipient, content.Length);
+
+        // Get tenant information if provided
+        Tenant? tenant = null;
+        if (tenantId.HasValue)
+        {
+            // Note: We don't fetch tenant here to avoid circular dependency, 
+            // just set the ID and name will be set during processing
+        }
+
+        var message = new Message
+        {
+            Recipient = recipient,
+            Content = content,
+            Status = MessageStatus.Queued,  // NEW: Start with Queued status
+            ChannelType = channelType,
+            TenantId = tenantId,
+            TenantName = tenant?.Name,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _dbContext.Messages.Add(message);
+        await _dbContext.SaveChangesAsync();
+
+        _logger.LogInformation("Message created with ID: {MessageId} and queued for processing", message.Id);
+
+        return message;
+    }
+
+    /// <summary>
+    /// Creates and sends a message directly using the specified channel (multi-tenant aware)
+    /// </summary>
+    public async Task<Message> CreateAndSendMessageAsync(
+        string recipient, 
+        string content, 
+        ChannelType channelType = ChannelType.SMPP,
+        int? tenantId = null,
+        string? channelName = null)
     {
         _logger.LogInformation("Creating and sending new message to {Recipient}, Content length: {ContentLength}", 
             recipient, content.Length);
+
+        // Get tenant information if provided
+        Tenant? tenant = null;
+        if (tenantId.HasValue)
+        {
+            // Note: We don't fetch tenant here to avoid circular dependency, 
+            // just set the ID and name will be set during processing
+        }
 
         var message = new Message
         {
@@ -43,6 +107,8 @@ public class MessageService
             Content = content,
             Status = MessageStatus.Pending,
             ChannelType = channelType,
+            TenantId = tenantId,
+            TenantName = tenant?.Name, // Will be set during channel processing if needed
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -53,15 +119,15 @@ public class MessageService
         _logger.LogInformation("Message created with ID: {MessageId}", message.Id);
 
         // Send message via specified channel
-        await SendMessageAsync(message.Id);
+        await SendMessageAsync(message.Id, channelName);
 
         return message;
     }
 
     /// <summary>
-    /// Sends a message by ID via the channel specified in the message
+    /// Sends a message by ID via the channel specified in the message (multi-tenant aware)
     /// </summary>
-    public async Task SendMessageAsync(int messageId)
+    public async Task SendMessageAsync(int messageId, string? channelName = null)
     {
         _logger.LogInformation("Starting message send process for message ID: {MessageId}", messageId);
         
@@ -81,13 +147,30 @@ public class MessageService
 
             try
             {
-                // Get the appropriate channel for this message
-                if (!_messageChannels.TryGetValue(message.ChannelType, out var channel))
+                IMessageChannel? channel = null;
+                
+                // Multi-tenant mode: Get tenant-specific channel
+                if (message.TenantId.HasValue)
                 {
-                    _logger.LogError("No channel available for type {ChannelType} for message ID: {MessageId}", 
-                        message.ChannelType, messageId);
-                    await UpdateMessageStatusAsync(message, MessageStatus.Failed);
-                    return;
+                    channel = await _tenantChannelManager.GetChannelAsync(message.TenantId.Value, channelName);
+                    if (channel == null)
+                    {
+                        _logger.LogError("No tenant channel available for tenant {TenantId}, channel {ChannelName} for message ID: {MessageId}", 
+                            message.TenantId, channelName ?? "default", messageId);
+                        await UpdateMessageStatusAsync(message, MessageStatus.Failed);
+                        return;
+                    }
+                }
+                else
+                {
+                    // Legacy single-tenant mode
+                    if (!_legacyChannels.TryGetValue(message.ChannelType, out channel))
+                    {
+                        _logger.LogError("No legacy channel available for type {ChannelType} for message ID: {MessageId}", 
+                            message.ChannelType, messageId);
+                        await UpdateMessageStatusAsync(message, MessageStatus.Failed);
+                        return;
+                    }
                 }
 
                 _logger.LogInformation("Sending message via {ChannelType} channel ({ProviderName}) to {PhoneNumber}", 
@@ -187,6 +270,31 @@ public class MessageService
     }
 
     /// <summary>
+    /// Updates message status by ID for background processing
+    /// </summary>
+    public async Task UpdateMessageStatusAsync(int messageId, MessageStatus status)
+    {
+        _logger.LogInformation("Updating message ID {MessageId} status to {NewStatus}", messageId, status);
+
+        var message = await _dbContext.Messages.FindAsync(messageId);
+        if (message == null)
+        {
+            _logger.LogError("Message with ID {MessageId} not found for status update", messageId);
+            return;
+        }
+
+        var oldStatus = message.Status;
+        message.Status = status;
+        message.UpdatedAt = DateTime.UtcNow;
+
+        _dbContext.Messages.Update(message);
+        await _dbContext.SaveChangesAsync();
+
+        _logger.LogInformation("Message ID {MessageId} status updated from {OldStatus} to {NewStatus}", 
+            messageId, oldStatus, status);
+    }
+
+    /// <summary>
     /// Updates the message status in database
     /// </summary>
     private async Task UpdateMessageStatusAsync(Message message, MessageStatus status)
@@ -204,21 +312,52 @@ public class MessageService
     }
 
     /// <summary>
-    /// Gets a message by ID
+    /// Gets a message by ID with tenant filtering
     /// </summary>
-    public async Task<Message?> GetMessageAsync(int id)
+    public async Task<Message?> GetMessageAsync(int id, int? tenantId = null)
     {
-        _logger.LogInformation("Retrieving message with ID: {MessageId}", id);
-        return await _dbContext.Messages.FindAsync(id);
+        _logger.LogInformation("Retrieving message with ID: {MessageId} (Tenant: {TenantId})", id, tenantId);
+        
+        if (tenantId.HasValue)
+        {
+            // Multi-tenant mode: Only return message if it belongs to the tenant
+            return await _dbContext.Messages
+                .Include(m => m.Parts)
+                .FirstOrDefaultAsync(m => m.Id == id && m.TenantId == tenantId);
+        }
+        else
+        {
+            // Single-tenant mode: Return any message (for backward compatibility)
+            return await _dbContext.Messages
+                .Include(m => m.Parts)
+                .FirstOrDefaultAsync(m => m.Id == id);
+        }
     }
 
     /// <summary>
-    /// Gets all messages ordered by creation date
+    /// Gets all messages ordered by creation date with tenant filtering
     /// </summary>
-    public async Task<List<Message>> GetAllMessagesAsync()
+    public async Task<List<Message>> GetAllMessagesAsync(int? tenantId = null)
     {
-        _logger.LogInformation("Retrieving all messages");
-        return await _dbContext.Messages.OrderByDescending(s => s.CreatedAt).ToListAsync();
+        _logger.LogInformation("Retrieving messages (Tenant: {TenantId})", tenantId);
+        
+        var query = _dbContext.Messages.Include(m => m.Parts);
+        
+        if (tenantId.HasValue)
+        {
+            // Multi-tenant mode: Only return messages belonging to the tenant
+            return await query
+                .Where(m => m.TenantId == tenantId)
+                .OrderByDescending(s => s.CreatedAt)
+                .ToListAsync();
+        }
+        else
+        {
+            // Single-tenant mode: Return all messages (for backward compatibility)
+            return await query
+                .OrderByDescending(s => s.CreatedAt)
+                .ToListAsync();
+        }
     }
 
     /// <summary>

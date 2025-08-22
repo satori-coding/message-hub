@@ -1,5 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using MessageHub.Channels.Shared;
+using MessageHub.Services;
+using MessageHub.DomainModels;
+using MassTransit;
 
 namespace MessageHub;
 
@@ -8,20 +11,39 @@ namespace MessageHub;
 public class MessageController : ControllerBase
 {
     private readonly MessageService _messageService;
+    private readonly ITenantService _tenantService;
     private readonly ILogger<MessageController> _logger;
+    private readonly IConfiguration _configuration;
+    private readonly IBus _bus;
 
-    public MessageController(MessageService messageService, ILogger<MessageController> logger)
+    public MessageController(
+        MessageService messageService, 
+        ITenantService tenantService,
+        ILogger<MessageController> logger,
+        IConfiguration configuration,
+        IBus bus)
     {
         _messageService = messageService;
+        _tenantService = tenantService;
         _logger = logger;
+        _configuration = configuration;
+        _bus = bus;
     }
 
     [HttpGet("{id}/status")]
     public async Task<ActionResult<MessageStatusResponse>> GetMessageStatus(int id)
     {
-        _logger.LogInformation("Getting message status for ID: {MessageId}", id);
+        // Validate tenant if multi-tenant mode is enabled
+        var tenantValidation = await ValidateTenantAsync();
+        if (tenantValidation.Tenant == null && IsMultiTenantEnabled())
+        {
+            return tenantValidation.ErrorResult!;
+        }
 
-        var message = await _messageService.GetMessageAsync(id);
+        _logger.LogInformation("Getting message status for ID: {MessageId} (Tenant: {TenantId})", 
+            id, tenantValidation.Tenant?.Id);
+
+        var message = await _messageService.GetMessageAsync(id, tenantValidation.Tenant?.Id);
         
         if (message == null)
         {
@@ -54,9 +76,16 @@ public class MessageController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<List<MessageStatusResponse>>> GetAllMessages()
     {
-        _logger.LogInformation("Getting all messages");
+        // Validate tenant if multi-tenant mode is enabled
+        var tenantValidation = await ValidateTenantAsync();
+        if (tenantValidation.Tenant == null && IsMultiTenantEnabled())
+        {
+            return tenantValidation.ErrorResult!;
+        }
 
-        var messages = await _messageService.GetAllMessagesAsync();
+        _logger.LogInformation("Getting all messages (Tenant: {TenantId})", tenantValidation.Tenant?.Id);
+
+        var messages = await _messageService.GetAllMessagesAsync(tenantValidation.Tenant?.Id);
         
         var response = messages.Select(message => new MessageStatusResponse
         {
@@ -83,8 +112,15 @@ public class MessageController : ControllerBase
     [HttpPost("send")]
     public async Task<ActionResult<SendMessageResponse>> SendMessage([FromBody] SendMessageRequest request)
     {
-        _logger.LogInformation("Received request to send message to {PhoneNumber} via {ChannelType} channel", 
-            request.PhoneNumber, request.ChannelType ?? ChannelType.SMPP);
+        // Validate tenant if multi-tenant mode is enabled
+        var tenantValidation = await ValidateTenantAsync();
+        if (tenantValidation.Tenant == null && IsMultiTenantEnabled())
+        {
+            return tenantValidation.ErrorResult!;
+        }
+
+        _logger.LogInformation("Received request to send message to {PhoneNumber} via {ChannelType} channel (Tenant: {TenantId})", 
+            request.PhoneNumber, request.ChannelType ?? ChannelType.SMPP, tenantValidation.Tenant?.Id);
 
         if (string.IsNullOrWhiteSpace(request.PhoneNumber) || string.IsNullOrWhiteSpace(request.Content))
         {
@@ -102,20 +138,41 @@ public class MessageController : ControllerBase
 
         try
         {
-            // Use specified channel type or default to SMPP
+            // 1. Create message in database with Queued status
             var channelType = request.ChannelType ?? ChannelType.SMPP;
-            var message = await _messageService.CreateAndSendMessageAsync(request.PhoneNumber, request.Content, channelType);
+            var message = await _messageService.CreateMessageAsync(
+                request.PhoneNumber, 
+                request.Content, 
+                channelType, 
+                tenantValidation.Tenant?.Id);
             
+            // 2. Publish command to queue for background processing
+            var command = new SendMessageCommand(
+                request.PhoneNumber,
+                request.Content,
+                channelType,
+                tenantValidation.Tenant?.Id,
+                request.ChannelName,
+                message.Id);
+                
+            await _bus.Publish(command);
+            
+            // 3. Generate status URL for client polling
+            var statusUrl = $"{Request.Scheme}://{Request.Host}/api/message/{message.Id}/status";
+            
+            // 4. Return immediate response with status URL
             var response = new SendMessageResponse
             {
                 Id = message.Id,
                 PhoneNumber = message.Recipient,
-                Status = GetDisplayStatus(message), // Enhanced status display
+                Status = GetDisplayStatus(message), // "Queued for processing"
+                StatusUrl = statusUrl,  // NEW: Direct status query URL
                 CreatedAt = message.CreatedAt,
                 Message = GetStatusMessage(message.Status)
             };
 
-            _logger.LogInformation("Message request processed successfully with ID: {MessageId}", message.Id);
+            _logger.LogInformation("Message queued successfully with ID: {MessageId}, StatusUrl: {StatusUrl}", 
+                message.Id, statusUrl);
             
             return Ok(response);
         }
@@ -130,10 +187,13 @@ public class MessageController : ControllerBase
     {
         return message.Status switch
         {
-            MessageStatus.Sent => "Sent (DLR pending)",
+            MessageStatus.Queued => "Queued for processing",
+            MessageStatus.Pending => "Processing...",
+            MessageStatus.Sent => "Sent (awaiting delivery confirmation)",
             MessageStatus.AssumedDelivered => "Assumed Delivered (no DLR received)",
             MessageStatus.DeliveryUnknown => "Delivery Unknown (DLR timeout)",
             MessageStatus.Delivered => "Delivered (confirmed)",
+            MessageStatus.PartiallyDelivered => "Partially Delivered (multi-part SMS)",
             _ => message.Status.ToString()
         };
     }
@@ -142,10 +202,12 @@ public class MessageController : ControllerBase
     {
         return status switch
         {
+            MessageStatus.Queued => "Message queued for processing",
             MessageStatus.Pending => "Message is being processed",
             MessageStatus.Sent => "Message sent successfully, awaiting delivery confirmation",
             MessageStatus.Failed => "Message delivery failed",
             MessageStatus.Delivered => "Message delivered successfully",
+            MessageStatus.PartiallyDelivered => "Some SMS parts delivered, others pending or failed",
             MessageStatus.AssumedDelivered => "Message sent successfully, delivery assumed (no receipt received)",
             MessageStatus.DeliveryUnknown => "Message sent but delivery status unknown",
             MessageStatus.Expired => "Message expired before delivery",
@@ -155,6 +217,43 @@ public class MessageController : ControllerBase
             MessageStatus.Accepted => "Message accepted by provider",
             _ => "Message processed"
         };
+    }
+
+    private async Task<(Tenant? Tenant, ActionResult? ErrorResult)> ValidateTenantAsync()
+    {
+        if (!IsMultiTenantEnabled())
+        {
+            return (null, null); // Single-tenant mode
+        }
+
+        var subscriptionKey = Request.Headers["X-Subscription-Key"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(subscriptionKey))
+        {
+            _logger.LogWarning("Missing X-Subscription-Key header in multi-tenant mode");
+            return (null, Unauthorized("X-Subscription-Key header is required"));
+        }
+
+        var tenant = await _tenantService.GetTenantBySubscriptionKeyAsync(subscriptionKey);
+        if (tenant == null)
+        {
+            _logger.LogWarning("Invalid subscription key provided: {SubscriptionKey}", 
+                subscriptionKey.Substring(0, Math.Min(8, subscriptionKey.Length)) + "***");
+            return (null, Unauthorized("Invalid subscription key"));
+        }
+
+        if (!_tenantService.ValidateTenantAccess(tenant))
+        {
+            _logger.LogWarning("Tenant access validation failed for tenant {TenantId} ({TenantName})", 
+                tenant.Id, tenant.Name);
+            return (null, StatusCode(403, "Tenant access denied"));
+        }
+
+        return (tenant, null);
+    }
+
+    private bool IsMultiTenantEnabled()
+    {
+        return _configuration.GetValue<bool>("MultiTenantSettings:EnableMultiTenant", false);
     }
 }
 
@@ -180,6 +279,7 @@ public class SendMessageRequest
     public string PhoneNumber { get; set; } = string.Empty;
     public string Content { get; set; } = string.Empty;
     public ChannelType? ChannelType { get; set; } = null; // Optional channel selection
+    public string? ChannelName { get; set; } = null; // Optional specific channel name for multi-tenant
 }
 
 public class SendMessageResponse
@@ -187,6 +287,7 @@ public class SendMessageResponse
     public int Id { get; set; }
     public string PhoneNumber { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
+    public string StatusUrl { get; set; } = string.Empty;  // NEW: Direct status query URL
     public DateTime CreatedAt { get; set; }
     public string Message { get; set; } = string.Empty;
 }

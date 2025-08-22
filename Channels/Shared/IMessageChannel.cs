@@ -101,6 +101,7 @@ public class MessageResult
 /// </summary>
 public enum MessageStatus
 {
+    Queued,         // NEW: Message queued for processing by background worker
     Pending,         // Message created but not yet sent
     Sent,           // Message submitted to provider (waiting for DLR)
     Failed,         // Message submission failed
@@ -151,10 +152,14 @@ public class Message
     public int Id { get; set; }
     public string Recipient { get; set; } = string.Empty;
     public string Content { get; set; } = string.Empty;
-    public MessageStatus Status { get; set; } = MessageStatus.Pending;
+    public MessageStatus Status { get; set; } = MessageStatus.Queued;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? SentAt { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    
+    // Multi-Tenant Support
+    public int? TenantId { get; set; }                                   // NULL for backward compatibility with existing data
+    public string? TenantName { get; set; }                             // For logging and display purposes
     
     // Multi-Channel Support fields
     public ChannelType ChannelType { get; set; } = ChannelType.SMPP;    // Default to SMPP for backward compatibility
